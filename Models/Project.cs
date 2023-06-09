@@ -1,9 +1,10 @@
 ﻿using System;
 using TimeTracker.Models;
+using TimeTracker.Utils;
 
-namespace Time_Tracker.Models
+namespace TimeTracker.Models
 {
-  internal class Job : TTDataObject
+  public class Project : TTDataObject
   {
     private string? _name;
     public string? Name
@@ -70,6 +71,20 @@ namespace Time_Tracker.Models
         if (_rate != value)
         {
           _rate = value;
+          OnPropertyChanged();
+        }
+      }
+    }
+
+    private TrulyObservableCollection<WorkEntry> _workEntries = new();
+    public TrulyObservableCollection<WorkEntry> WorkEntries
+    {
+      get { return _workEntries; }
+      set
+      {
+        if (_workEntries != value)
+        {
+          _workEntries = value;
           OnPropertyChanged();
         }
       }

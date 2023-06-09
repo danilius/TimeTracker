@@ -1,0 +1,69 @@
+﻿<UserControl
+  x:Class="TimeTracker.Controls.WorkEntryControl"
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:Models="clr-namespace:TimeTracker.Models"
+  xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+  xmlns:local="clr-namespace:TimeTracker.Controls"
+  xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+  Height="30"
+  d:DesignWidth="600"
+  mc:Ignorable="d">
+  <!--  end of main grid  -->
+  <UserControl.DataContext>
+    <Models:WorkEntry />
+  </UserControl.DataContext>
+  <Grid>
+    <Grid.ColumnDefinitions>
+      <ColumnDefinition />
+      <ColumnDefinition />
+      <ColumnDefinition />
+      <ColumnDefinition />
+      <ColumnDefinition />
+    </Grid.ColumnDefinitions>
+    <Grid.RowDefinitions>
+      <RowDefinition />
+      <RowDefinition Height="1" />
+    </Grid.RowDefinitions>
+    <Label
+      Grid.Row="0"
+      Grid.Column="0"
+      VerticalContentAlignment="Center"
+      d:Content="A Job Name"
+      Content="{Binding Path=Description}" />
+    <Label
+      Grid.Row="0"
+      Grid.Column="1"
+      VerticalContentAlignment="Center"
+      d:Content="23/04/2023"
+      Content="{Binding Path=StartTime}"
+      ContentStringFormat="{}Started: {0}" />
+    <Label
+      Grid.Row="0"
+      Grid.Column="2"
+      VerticalContentAlignment="Center"
+      d:Content="23/04/2023"
+      Content="{Binding Path=StartTime, FallbackValue='--'}"
+      ContentStringFormat="{}Ended: {0}" />
+    <Label
+      Grid.Row="0"
+      Grid.Column="3"
+      VerticalContentAlignment="Center"
+      d:Content="01:34"
+      Content="{Binding Path=Duration, FallbackValue='00:00'}"
+      ContentStringFormat="{}Duration: {0}" />
+    <Button
+      Grid.Row="0"
+      Grid.Column="4"
+      Content="Restart" />
+    <!--  line at the bottom of the control  -->
+    <Rectangle
+      Grid.Row="1"
+      Grid.Column="0"
+      Grid.ColumnSpan="10"
+      Height="1"
+      HorizontalAlignment="Stretch"
+      VerticalAlignment="Bottom"
+      Fill="Gray" />
+  </Grid>
+</UserControl>

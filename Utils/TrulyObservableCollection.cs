@@ -4,7 +4,6 @@ using System.ComponentModel;
 
 namespace TimeTracker.Utils
 {
-
     public class TrulyObservableCollection<T> : ObservableCollection<T> where T : INotifyPropertyChanged
     {
         protected override void OnCollectionChanged(NotifyCollectionChangedEventArgs e)

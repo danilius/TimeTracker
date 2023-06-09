@@ -1,9 +1,8 @@
-﻿
-
-using System;
+﻿using System;
 using TimeTracker.Models;
+using TimeTracker.Utils;
 
-namespace Time_Tracker.Models
+namespace TimeTracker.Models
 {
   public class Client : TTDataObject
   {
@@ -44,6 +43,20 @@ namespace Time_Tracker.Models
         if (_id != value)
         {
           _id = value;
+          OnPropertyChanged();
+        }
+      }
+    }
+
+    private TrulyObservableCollection<Project> _jobs = new();
+    public TrulyObservableCollection<Project> Jobs
+    {
+      get { return _jobs; }
+      set
+      {
+        if (_jobs != value)
+        {
+          _jobs = value;
           OnPropertyChanged();
         }
       }

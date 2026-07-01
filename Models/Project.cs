@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Text.Json.Serialization;
+using System.Windows.Media;
 using TimeTracker.Models;
 using TimeTracker.Utils;
 
@@ -35,6 +37,7 @@ namespace TimeTracker.Models
     }
 
     private Client? _client;
+    [ JsonIgnore]
     public Client? Client
     {
       get { return _client; }
@@ -49,7 +52,7 @@ namespace TimeTracker.Models
     }
 
     private Guid _id;
-    public Guid Id
+    public Guid ID
     {
       get { return _id; }
       set
@@ -89,5 +92,20 @@ namespace TimeTracker.Models
         }
       }
     }
+
+    private Color _projectColour;
+    public Color ProjectColour
+    {
+      get { return _projectColour; }
+      set
+      {
+        if (_projectColour != value)
+        {
+          _projectColour = value;
+          OnPropertyChanged();
+        }
+      }
+    }
+
   }
 }

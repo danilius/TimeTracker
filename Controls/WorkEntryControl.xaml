@@ -6,59 +6,115 @@
   xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
   xmlns:local="clr-namespace:TimeTracker.Controls"
   xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-  Height="30"
+  Height="70"
   d:DesignWidth="600"
-  mc:Ignorable="d">
-  <!--  end of main grid  -->
-  <UserControl.DataContext>
+  DataContextChanged="UserControl_DataContextChanged"
+  FontSize="14"
+  mc:Ignorable="d"
+  MouseDoubleClick="UserControl_MouseDoubleClick"
+  PreviewMouseWheel="UserControl_PreviewMouseWheel">
+
+  <UserControl.Style>
+    <Style TargetType="{x:Type UserControl}">
+      <Setter Property="Background" Value="Transparent" />
+      <Style.Triggers>
+        <DataTrigger Binding="{Binding IsRunning}" Value="True">
+          <Setter Property="Background" Value="#DFF5DF" />
+        </DataTrigger>
+      </Style.Triggers>
+    </Style>
+  </UserControl.Style>
+
+  <d:UserControl.DataContext>
     <Models:WorkEntry />
-  </UserControl.DataContext>
-  <Grid>
-    <Grid.ColumnDefinitions>
-      <ColumnDefinition />
-      <ColumnDefinition />
-      <ColumnDefinition />
-      <ColumnDefinition />
-      <ColumnDefinition />
-    </Grid.ColumnDefinitions>
+  </d:UserControl.DataContext>
+  
+  <Grid Background="{Binding Background, RelativeSource={RelativeSource AncestorType=UserControl}}">
     <Grid.RowDefinitions>
       <RowDefinition />
-      <RowDefinition Height="1" />
+      <RowDefinition />
+      <RowDefinition />
     </Grid.RowDefinitions>
-    <Label
+    <Grid.ColumnDefinitions>
+      <ColumnDefinition Width="1.5*" />
+      <ColumnDefinition Width="Auto" />
+      <ColumnDefinition Width="Auto" />
+      <ColumnDefinition Width="Auto" />
+      <ColumnDefinition Width="50" />
+      <ColumnDefinition Width="50" />
+    </Grid.ColumnDefinitions>
+    <StackPanel
       Grid.Row="0"
       Grid.Column="0"
+      Orientation="Horizontal">
+      <Label
+        x:Name="projectNameLabel"
+        Margin="0,-5,0,0"
+        d:Content="Project Name"
+        Content="{Binding Path=Project.Name}"
+        ContentStringFormat="{}Project: {0}"
+        FontWeight="Bold" />
+      <Label
+      Margin="0,-5,0,0"
       VerticalContentAlignment="Center"
-      d:Content="A Job Name"
-      Content="{Binding Path=Description}" />
+      d:Content="Job description"
+      Content="{Binding Path=Project.Description}" />
+    </StackPanel>
     <Label
-      Grid.Row="0"
-      Grid.Column="1"
+      Grid.Row="1"
+      Grid.Column="0"
+      Margin="0,-5,0,0"
+      VerticalContentAlignment="Center"
+      d:Content="Client Name"
+      Content="{Binding Path=Project.Client.Name}"
+      ContentStringFormat="{}Client: {0}"
+      FontWeight="Bold"
+      Foreground="{Binding Project.ProjectColour}" />
+    <Label
+      Grid.Row="2"
+      Grid.Column="0"
+      Margin="0,-5,0,0"
       VerticalContentAlignment="Center"
       d:Content="23/04/2023"
       Content="{Binding Path=StartTime}"
       ContentStringFormat="{}Started: {0}" />
     <Label
       Grid.Row="0"
-      Grid.Column="2"
-      VerticalContentAlignment="Center"
-      d:Content="23/04/2023"
-      Content="{Binding Path=StartTime, FallbackValue='--'}"
-      ContentStringFormat="{}Ended: {0}" />
-    <Label
-      Grid.Row="0"
+      Grid.RowSpan="3"
       Grid.Column="3"
+      HorizontalContentAlignment="Center"
       VerticalContentAlignment="Center"
       d:Content="01:34"
-      Content="{Binding Path=Duration, FallbackValue='00:00'}"
-      ContentStringFormat="{}Duration: {0}" />
+      Content="{Binding Path=Duration}"
+      ContentStringFormat="{}{0:hh}:{0:mm}:{0:ss}"
+      FontSize="30"
+      FontWeight="ExtraLight" />
     <Button
       Grid.Row="0"
+      Grid.RowSpan="3"
       Grid.Column="4"
-      Content="Restart" />
+      Width="40"
+      Height="40"
+      Click="RunButton_Click"
+      Content="&#xE102;"
+      FontFamily="Segoe MDL2 Assets"
+      FontSize="24"
+      Template="{StaticResource RoundButtonTemplate}" />
+    <Button
+      Grid.RowSpan="3"
+      Grid.Column="5"
+      Width="40"
+      Height="40"
+      Margin="5"
+      Click="DeleteButton_Click"
+      Content="&#xE107;"
+      FontFamily="Segoe MDL2 Assets"
+      FontSize="24"
+      Template="{StaticResource RoundButtonTemplate}" />
+
     <!--  line at the bottom of the control  -->
     <Rectangle
-      Grid.Row="1"
+      Grid.Row="2"
       Grid.Column="0"
       Grid.ColumnSpan="10"
       Height="1"

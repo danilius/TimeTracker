@@ -1,0 +1,167 @@
+﻿<Window
+  x:Class="TimeTracker.Dialogs.NewWorkEntryDialog"
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:Controls="clr-namespace:TimeTracker.Controls"
+  xmlns:ViewModels="clr-namespace:TimeTracker.ViewModels"
+  xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+  xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+  Title="New Work Entry"
+  Width="300"
+  Height="480"
+  Loaded="Window_Loaded"
+  ResizeMode="NoResize"
+  WindowStyle="SingleBorderWindow"
+  mc:Ignorable="d">
+
+
+
+  <Window.DataContext>
+    <ViewModels:NewWorkEntryModel x:Name="newWorkEntryModel" />
+  </Window.DataContext>
+
+
+
+  <Grid>
+    <Label
+      Margin="10"
+      HorizontalAlignment="Left"
+      VerticalAlignment="Top"
+      Content="Client" />
+    <ComboBox
+      x:Name="ClientComboBox"
+      Width="200"
+      Height="24"
+      Margin="15,35,0,0"
+      HorizontalAlignment="Left"
+      VerticalAlignment="Top"
+      DisplayMemberPath="Name"
+      IsEditable="True"
+      SelectionChanged="ClientComboBox_SelectionChanged"
+      Text="{Binding ClientName, UpdateSourceTrigger=PropertyChanged}" />
+    <Label
+      Margin="10,65,0,0"
+      HorizontalAlignment="Left"
+      VerticalAlignment="Top"
+      Content="Project" />
+    <ComboBox
+      x:Name="ProjectComboBox"
+      Width="200"
+      Height="24"
+      Margin="15,90,0,0"
+      HorizontalAlignment="Left"
+      VerticalAlignment="Top"
+      DisplayMemberPath="Name"
+      IsEditable="True"
+      SelectionChanged="ProjectComboBox_SelectionChanged"
+      Text="{Binding ProjectName, UpdateSourceTrigger=LostFocus}" />
+    <Label
+      Height="24"
+      Margin="10,125,0,0"
+      HorizontalAlignment="Left"
+      VerticalAlignment="Top"
+      Content="Start Time" />
+    <Controls:DateTimePicker
+      x:Name="StartTimePicker"
+      Margin="15,149,0,0"
+      HorizontalAlignment="Left"
+      VerticalAlignment="Top"
+      SelectedDate="{Binding StartTime}" />
+    <Label
+      Height="24"
+      Margin="10,185,0,0"
+      HorizontalAlignment="Left"
+      VerticalAlignment="Top"
+      Content="Duration" />
+    <TextBox
+      x:Name="DurationHoursTextBox"
+      Width="45"
+      Height="24"
+      Margin="15,210,0,0"
+      HorizontalAlignment="Left"
+      VerticalAlignment="Top"
+      PreviewTextInput="WholeNumberTextBox_PreviewTextInput" />
+    <Label
+      Height="24"
+      Margin="62,210,0,0"
+      HorizontalAlignment="Left"
+      VerticalAlignment="Top"
+      Content="h" />
+    <TextBox
+      x:Name="DurationMinutesTextBox"
+      Width="45"
+      Height="24"
+      Margin="90,210,0,0"
+      HorizontalAlignment="Left"
+      VerticalAlignment="Top"
+      PreviewTextInput="WholeNumberTextBox_PreviewTextInput" />
+    <Label
+      Height="24"
+      Margin="137,210,0,0"
+      HorizontalAlignment="Left"
+      VerticalAlignment="Top"
+      Content="m" />
+    <Label
+      Height="24"
+      Margin="10,245,0,0"
+      HorizontalAlignment="Left"
+      VerticalAlignment="Top"
+      Content="Description" />
+    <TextBox
+      x:Name="DescriptionTextBox"
+      Width="200"
+      Height="24"
+      Margin="15,270,0,0"
+      HorizontalAlignment="Left"
+      VerticalAlignment="Top"
+      Text="{Binding Description}" />
+    <Button
+      x:Name="StartButton"
+      Width="75"
+      Height="24"
+      Margin="200,395,0,0"
+      HorizontalAlignment="Left"
+      VerticalAlignment="Top"
+      Click="StartButton_Click"
+      Content="Start"
+      IsDefault="True" />
+    <Button
+      x:Name="CancelButton"
+      Width="75"
+      Height="24"
+      Margin="120,395,0,0"
+      HorizontalAlignment="Left"
+      VerticalAlignment="Top"
+      Content="Cancel"
+      IsCancel="True" />
+    <Label
+      Height="24"
+      Margin="10,305,0,0"
+      HorizontalAlignment="Left"
+      VerticalAlignment="Top"
+      Content="Hourly Rate" />
+    <TextBox
+      x:Name="HourlyRateTextBox"
+      Width="95"
+      Height="24"
+      Margin="15,330,0,0"
+      HorizontalAlignment="Left"
+      VerticalAlignment="Top"
+      PreviewTextInput="DecimalTextBox_PreviewTextInput" />
+    <Label
+      Height="24"
+      Margin="120,305,0,0"
+      HorizontalAlignment="Left"
+      VerticalAlignment="Top"
+      Content="Currency" />
+    <ComboBox
+      x:Name="CurrencyComboBox"
+      Width="95"
+      Height="24"
+      Margin="125,330,0,0"
+      HorizontalAlignment="Left"
+      VerticalAlignment="Top"
+      IsEditable="True"
+      IsTextSearchEnabled="True" />
+  </Grid>
+</Window>

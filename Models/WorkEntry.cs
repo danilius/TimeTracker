@@ -1,20 +1,33 @@
 ﻿using System;
-using FastEnumUtility;
+using System.Text.Json.Serialization;
 
 namespace TimeTracker.Models
 {
-  public enum WorkEntryTypes
-  {
-    [Label("Work")]
-    Work,
-    [Label("Purchase")]
-    Purchase
-  }
-
+  
   public class WorkEntry : TTDataObject
   {
-    private DateTime? _startTime;
-    public DateTime? StartTime
+  
+    public WorkEntry()
+    {
+    }
+
+    private Project? _project;
+    [JsonIgnore]
+    public Project? Project
+    {
+      get { return _project; }
+      set
+      {
+        if (_project != value)
+        {
+          _project = value;
+          OnPropertyChanged();
+        }
+      }
+    }
+
+    private DateTime _startTime;
+    public DateTime StartTime
     {
       get { return _startTime; }
       set
@@ -27,8 +40,8 @@ namespace TimeTracker.Models
       }
     }
 
-    private DateTime? _endTime;
-    public DateTime? EndTime
+    private DateTime _endTime;
+    public DateTime EndTime
     {
       get { return _endTime; }
       set
@@ -37,6 +50,7 @@ namespace TimeTracker.Models
         {
           _endTime = value;
           OnPropertyChanged();
+          OnPropertyChanged(nameof(Duration));
         }
       }
     }
@@ -55,15 +69,64 @@ namespace TimeTracker.Models
       }
     }
 
-    private WorkEntryTypes _workEntryType;
-    public WorkEntryTypes WorkEntryType
+    private Guid _id;
+    public Guid ID
     {
-      get { return _workEntryType; }
+      get { return _id; }
       set
       {
-        if (_workEntryType != value)
+        if (_id != value)
         {
-          _workEntryType = value;
+          _id = value;
+          OnPropertyChanged();
+        }
+      }
+    }
+
+    private bool _isRunning;
+    [JsonIgnore]
+    public bool IsRunning
+    {
+      get { return _isRunning; }
+      set
+      {
+        if (_isRunning != value)
+        {
+          _isRunning = value;
+          OnPropertyChanged();
+        }
+      }
+    }
+
+    [JsonIgnore]
+    public string ClientName => Project?.Client?.Name ?? string.Empty;
+
+    [JsonIgnore]
+    public string ProjectName => Project?.Name ?? string.Empty;
+
+    private decimal _hourlyRate;
+    public decimal HourlyRate
+    {
+      get { return _hourlyRate; }
+      set
+      {
+        if (_hourlyRate != value)
+        {
+          _hourlyRate = value;
+          OnPropertyChanged();
+        }
+      }
+    }
+
+    private string _currency = string.Empty;
+    public string Currency
+    {
+      get { return _currency; }
+      set
+      {
+        if (_currency != value)
+        {
+          _currency = value;
           OnPropertyChanged();
         }
       }
@@ -73,15 +136,19 @@ namespace TimeTracker.Models
     {
       get
       {
-        if (StartTime == null || EndTime == null)
+        if (IsRunning)
+        {
+          return DateTime.Now - StartTime;
+        }
+
+        if (EndTime == default)
         {
           return TimeSpan.Zero;
         }
-        else
-        {
-          return EndTime.Value - StartTime.Value;
-        }
+
+        return EndTime - StartTime;
       }
     }
+
   }
 }

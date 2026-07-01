@@ -10,8 +10,8 @@ namespace TimeTracker.Models
   {
     public TTDataObject()
     {
-      _dateCreated = DateTime.Now;
-      _dateModified = DateTime.Now;
+      //_dateCreated = DateTime.Now;
+      //_dateModified = DateTime.Now;
     }
 
     private bool _dataIsDirty = false;
@@ -25,34 +25,6 @@ namespace TimeTracker.Models
         {
           _dataIsDirty = value;
 
-          OnPropertyChanged();
-        }
-      }
-    }
-
-    private DateTime _dateCreated;
-    public DateTime DateCreated
-    {
-      get { return _dateCreated; }
-      set
-      {
-        if (_dateCreated != value)
-        {
-          _dateCreated = value;
-          OnPropertyChanged();
-        }
-      }
-    }
-
-    private DateTime _dateModified;
-    public DateTime DateModified
-    {
-      get { return _dateModified; }
-      set
-      {
-        if (_dateModified != value)
-        {
-          _dateModified = value;
           OnPropertyChanged();
         }
       }
@@ -73,14 +45,6 @@ namespace TimeTracker.Models
       }
     }
 
-    [JsonIgnore]
-    private TTDataObject? _parent;
-    public TTDataObject? Parent
-    {
-      get => _parent;
-      set => _parent = value;
-    }
-
     private bool _isArchived = false;
     public virtual bool IsArchived
     {
@@ -89,6 +53,20 @@ namespace TimeTracker.Models
       {
         _isArchived = value;
         OnPropertyChanged();
+      }
+    }
+
+    private DateTime? _dateArchived;
+    public DateTime? DateArchived
+    {
+      get => _dateArchived;
+      set
+      {
+        if (_dateArchived != value)
+        {
+          _dateArchived = value;
+          OnPropertyChanged();
+        }
       }
     }
 

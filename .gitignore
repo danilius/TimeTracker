@@ -369,3 +369,6 @@ Templates/*.docx
 
 # Local design mockups
 mockups/
+
+# Local Affinity document lock files
+*.af~lock~

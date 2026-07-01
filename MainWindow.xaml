@@ -14,6 +14,7 @@
   Closing="Window_Closing"
   ContentRendered="Window_ContentRendered"
   FontFamily="Segoe UI"
+  Icon="resources/time tracker icon.ico"
   StateChanged="Window_StateChanged"
   mc:Ignorable="d">
 

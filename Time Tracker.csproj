@@ -6,12 +6,17 @@
     <RootNamespace>TimeTracker</RootNamespace>
     <Nullable>enable</Nullable>
     <UseWPF>true</UseWPF>
+    <ApplicationIcon>resources\time tracker icon.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
     <Compile Remove="Scratch\**\*.cs" />
     <PackageReference Include="FastEnum" Version="1.8.0" />
     <PackageReference Include="LiteDB" Version="5.0.16" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="resources\time tracker icon.ico" />
   </ItemGroup>
 
 </Project>

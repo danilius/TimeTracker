@@ -1,270 +1,429 @@
-﻿<Window
+<Window
   x:Class="TimeTracker.MainWindow"
   xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-  xmlns:XamlControls="using:Windows.UI.Xaml.Controls"
   xmlns:controls="clr-namespace:TimeTracker.Controls"
   xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
-  xmlns:local="clr-namespace:TimeTracker"
   xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-  xmlns:models="clr-namespace:TimeTracker.Models"
-  Title="MainWindow"
-  Width="800"
-  Height="450"
+  Title="Time Tracker"
+  Width="1120"
+  Height="720"
+  MinWidth="820"
+  MinHeight="520"
+  Background="#F3F5F7"
   Closing="Window_Closing"
+  FontFamily="Segoe UI"
   mc:Ignorable="d">
 
-  
-
-
   <Window.Resources>
-    <Style x:Key="NavBarIconButtonStyle" TargetType="Button">
-      <Setter Property="Background" Value="Black" />
+    <SolidColorBrush x:Key="AccentBrush" Color="#0090EE" />
+    <SolidColorBrush x:Key="AppBackgroundBrush" Color="#F3F5F7" />
+    <SolidColorBrush x:Key="PanelBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="PanelBorderBrush" Color="#D9E0E7" />
+    <SolidColorBrush x:Key="PrimaryTextBrush" Color="#17212B" />
+    <SolidColorBrush x:Key="SecondaryTextBrush" Color="#64707D" />
+    <SolidColorBrush x:Key="NavBrush" Color="#0B0F14" />
+    <SolidColorBrush x:Key="NavHoverBrush" Color="#121A22" />
+    <SolidColorBrush x:Key="SuccessBrush" Color="#1F9D61" />
+    <SolidColorBrush x:Key="WarningBrush" Color="#D98B16" />
+
+    <Style x:Key="SmallLabelTextStyle" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="14" />
+      <Setter Property="Foreground" Value="{StaticResource SecondaryTextBrush}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <Style x:Key="FieldLabelTextStyle" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="14" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <Style x:Key="SectionLabelTextStyle" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="17" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <Style TargetType="TextBox">
+      <Setter Property="Height" Value="38" />
+      <Setter Property="Padding" Value="12,0" />
+      <Setter Property="FontSize" Value="15" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+      <Setter Property="BorderBrush" Value="{StaticResource PanelBorderBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+    </Style>
+
+    <Style TargetType="ComboBox">
+      <Setter Property="Height" Value="38" />
+      <Setter Property="Padding" Value="10,0" />
+      <Setter Property="FontSize" Value="15" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+      <Setter Property="BorderBrush" Value="{StaticResource PanelBorderBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+    </Style>
+
+    <Style x:Key="NavIconButtonStyle" TargetType="Button">
+      <Setter Property="Width" Value="44" />
+      <Setter Property="Height" Value="44" />
+      <Setter Property="Margin" Value="3,2" />
+      <Setter Property="Background" Value="Transparent" />
       <Setter Property="BorderThickness" Value="0" />
-      <Setter Property="Foreground" Value="White" />
-      <Setter Property="FontFamily" Value="Segoe MDL2 Assets" />
-      <Setter Property="FontSize" Value="22" />
-      <Setter Property="FontWeight" Value="ExtraLight" />
+      <Setter Property="Foreground" Value="#C8D1DC" />
+      <Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets" />
+      <Setter Property="FontSize" Value="18" />
+      <Setter Property="Cursor" Value="Hand" />
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
-            <Border Background="{TemplateBinding Background}">
+            <Border
+              x:Name="ButtonChrome"
+              Background="{TemplateBinding Background}"
+              CornerRadius="6">
               <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
             </Border>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
-                <Setter Property="Background" Value="Black" />
-                <Setter Property="Foreground" Value="#0090EE" />
+                <Setter TargetName="ButtonChrome" Property="Background" Value="{StaticResource NavHoverBrush}" />
+                <Setter Property="Foreground" Value="White" />
               </Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>
       </Setter>
     </Style>
-    <Style x:Key="NavBarButtonStyle" TargetType="Button">
-      <Setter Property="Background" Value="Black" />
+
+    <Style x:Key="NavLabelButtonStyle" TargetType="Button">
+      <Setter Property="Height" Value="44" />
+      <Setter Property="Margin" Value="0,2,10,2" />
+      <Setter Property="Padding" Value="4,0,8,0" />
+      <Setter Property="Background" Value="Transparent" />
       <Setter Property="BorderThickness" Value="0" />
-      <Setter Property="Foreground" Value="White" />
-      <Setter Property="FontSize" Value="22" />
-      <Setter Property="FontWeight" Value="Light" />
+      <Setter Property="Foreground" Value="#C8D1DC" />
+      <Setter Property="FontSize" Value="14" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="HorizontalContentAlignment" Value="Left" />
+      <Setter Property="Cursor" Value="Hand" />
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
-            <Border Background="{TemplateBinding Background}">
-              <ContentPresenter HorizontalAlignment="Left" VerticalAlignment="Center" />
+            <Border
+              x:Name="ButtonChrome"
+              Background="{TemplateBinding Background}"
+              CornerRadius="6">
+              <ContentPresenter
+                Margin="{TemplateBinding Padding}"
+                HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                VerticalAlignment="Center" />
             </Border>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
-                <Setter Property="Background" Value="Black" />
-                <Setter Property="Foreground" Value="#0090EE" />
+                <Setter TargetName="ButtonChrome" Property="Background" Value="{StaticResource NavHoverBrush}" />
+                <Setter Property="Foreground" Value="White" />
               </Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>
       </Setter>
     </Style>
+
+    <Style x:Key="AppButtonBaseStyle" TargetType="Button">
+      <Setter Property="Height" Value="36" />
+      <Setter Property="MinWidth" Value="96" />
+      <Setter Property="Padding" Value="14,0" />
+      <Setter Property="Margin" Value="0,0,8,0" />
+      <Setter Property="Background" Value="#FFFFFF" />
+      <Setter Property="BorderBrush" Value="#CBD5DF" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
+      <Setter Property="FontSize" Value="15" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border
+              x:Name="ButtonChrome"
+              Background="{TemplateBinding Background}"
+              BorderBrush="{TemplateBinding BorderBrush}"
+              BorderThickness="{TemplateBinding BorderThickness}"
+              CornerRadius="6">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="ButtonChrome" Property="Background" Value="#EAF4FF" />
+                <Setter TargetName="ButtonChrome" Property="BorderBrush" Value="#8EC7F7" />
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.55" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="PrimaryButtonStyle" BasedOn="{StaticResource AppButtonBaseStyle}" TargetType="Button">
+      <Setter Property="Background" Value="{StaticResource AccentBrush}" />
+      <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+      <Setter Property="Foreground" Value="White" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border
+              x:Name="ButtonChrome"
+              Background="{TemplateBinding Background}"
+              BorderBrush="{TemplateBinding BorderBrush}"
+              BorderThickness="{TemplateBinding BorderThickness}"
+              CornerRadius="6">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="ButtonChrome" Property="Background" Value="#0B7FD0" />
+                <Setter TargetName="ButtonChrome" Property="BorderBrush" Value="#0B7FD0" />
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.55" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="SecondaryButtonStyle" BasedOn="{StaticResource AppButtonBaseStyle}" TargetType="Button" />
+
+    <Style x:Key="DangerButtonStyle" BasedOn="{StaticResource AppButtonBaseStyle}" TargetType="Button">
+      <Setter Property="Background" Value="#C22F2F" />
+      <Setter Property="BorderBrush" Value="#C22F2F" />
+      <Setter Property="Foreground" Value="White" />
+      <Setter Property="FontWeight" Value="Bold" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border
+              x:Name="ButtonChrome"
+              Background="{TemplateBinding Background}"
+              BorderBrush="{TemplateBinding BorderBrush}"
+              BorderThickness="{TemplateBinding BorderThickness}"
+              CornerRadius="6">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="ButtonChrome" Property="Background" Value="#A92828" />
+                <Setter TargetName="ButtonChrome" Property="BorderBrush" Value="#A92828" />
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.55" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="ToolbarButtonStyle" BasedOn="{StaticResource SecondaryButtonStyle}" TargetType="Button">
+      <Setter Property="Height" Value="34" />
+      <Setter Property="MinWidth" Value="88" />
+      <Setter Property="FontSize" Value="14" />
+    </Style>
+
+    <Style x:Key="IconButtonStyle" BasedOn="{StaticResource AppButtonBaseStyle}" TargetType="Button">
+      <Setter Property="Width" Value="38" />
+      <Setter Property="Height" Value="38" />
+      <Setter Property="MinWidth" Value="38" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets" />
+      <Setter Property="FontSize" Value="16" />
+    </Style>
+
+    <Style x:Key="FlatIconButtonStyle" BasedOn="{StaticResource AppButtonBaseStyle}" TargetType="Button">
+      <Setter Property="Width" Value="30" />
+      <Setter Property="Height" Value="30" />
+      <Setter Property="MinWidth" Value="30" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+      <Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets" />
+      <Setter Property="FontSize" Value="13" />
+    </Style>
+
+    <Style x:Key="PanelBorderStyle" TargetType="Border">
+      <Setter Property="Background" Value="{StaticResource PanelBrush}" />
+      <Setter Property="BorderBrush" Value="{StaticResource PanelBorderBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="8" />
+      <Setter Property="Padding" Value="16" />
+    </Style>
+
+    <Style x:Key="DenseDataGridStyle" TargetType="DataGrid">
+      <Setter Property="Background" Value="White" />
+      <Setter Property="BorderBrush" Value="{StaticResource PanelBorderBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="RowBackground" Value="White" />
+      <Setter Property="AlternatingRowBackground" Value="#FAFBFC" />
+      <Setter Property="GridLinesVisibility" Value="Horizontal" />
+      <Setter Property="HorizontalGridLinesBrush" Value="#E7ECF1" />
+      <Setter Property="HeadersVisibility" Value="Column" />
+      <Setter Property="RowHeight" Value="34" />
+      <Setter Property="ColumnHeaderHeight" Value="36" />
+      <Setter Property="FontSize" Value="13" />
+    </Style>
   </Window.Resources>
 
-  <!--  main grid  -->
-  <Grid x:Name="MainGrid">
+  <Grid x:Name="MainGrid" Background="{StaticResource AppBackgroundBrush}">
     <Grid.ColumnDefinitions>
-      <ColumnDefinition x:Name="NavColumn" Width="200" />
+      <ColumnDefinition x:Name="NavColumn" Width="220" />
       <ColumnDefinition Width="*" />
     </Grid.ColumnDefinitions>
 
-    <!--  navbar  -->
-    <Rectangle Grid.Column="0" Fill="Black" />
-    <Rectangle
-      Grid.Column="0"
-      Width="2"
-      HorizontalAlignment="Right"
-      Fill="#0090EE" />
-    <Grid
-      x:Name="NavBarGrid"
-      Grid.Column="0"
-      VerticalAlignment="Top">
+    <Border Grid.Column="0" Background="{StaticResource NavBrush}">
+      <Grid>
+        <Grid.RowDefinitions>
+          <RowDefinition Height="64" />
+          <RowDefinition Height="*" />
+          <RowDefinition Height="56" />
+        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="50" />
+          <ColumnDefinition />
+        </Grid.ColumnDefinitions>
+
+        <Button
+          x:Name="HamburgerButton"
+          Grid.Row="0"
+          Grid.Column="0"
+          Click="HamburgerButton_Click"
+          Content="&#xE700;"
+          Style="{StaticResource NavIconButtonStyle}" />
+        <TextBlock
+          x:Name="AppTitleLabel"
+          Grid.Row="0"
+          Grid.Column="1"
+          VerticalAlignment="Center"
+          FontSize="17"
+          FontWeight="SemiBold"
+          Foreground="White"
+          Text="Time Tracker" />
+
+        <Grid
+          x:Name="NavBarGrid"
+          Grid.Row="1"
+          Grid.Column="0"
+          Grid.ColumnSpan="2"
+          Margin="0,4,0,0"
+          VerticalAlignment="Top">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="48" />
+            <RowDefinition Height="48" />
+            <RowDefinition Height="48" />
+            <RowDefinition Height="48" />
+            <RowDefinition Height="48" />
+            <RowDefinition Height="48" />
+            <RowDefinition Height="48" />
+            <RowDefinition Height="48" />
+          </Grid.RowDefinitions>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="50" />
+            <ColumnDefinition />
+          </Grid.ColumnDefinitions>
+
+          <Button x:Name="DashboardIconButton" Grid.Row="0" Grid.Column="0" Click="DashboardButton_Click" Content="&#xE80F;" Style="{StaticResource NavIconButtonStyle}" />
+          <Button x:Name="DashboardLabelButton" Grid.Row="0" Grid.Column="1" Click="DashboardButton_Click" Content="Dashboard" Style="{StaticResource NavLabelButtonStyle}" />
+
+          <Button x:Name="JobsIconButton" Grid.Row="1" Grid.Column="0" Click="JobsButton_Click" Content="&#xE7C3;" Style="{StaticResource NavIconButtonStyle}" />
+          <Button x:Name="JobsLabelButton" Grid.Row="1" Grid.Column="1" Click="JobsButton_Click" Content="Jobs" Style="{StaticResource NavLabelButtonStyle}" />
+
+          <Button x:Name="ClientsIconButton" Grid.Row="2" Grid.Column="0" Click="ClientsButton_Click" Content="&#xE716;" Style="{StaticResource NavIconButtonStyle}" />
+          <Button x:Name="ClientsLabelButton" Grid.Row="2" Grid.Column="1" Click="ClientsButton_Click" Content="Clients" Style="{StaticResource NavLabelButtonStyle}" />
+
+          <Button x:Name="ProjectsIconButton" Grid.Row="3" Grid.Column="0" Click="ProjectsButton_Click" Content="&#xE8F1;" Style="{StaticResource NavIconButtonStyle}" />
+          <Button x:Name="ProjectsLabelButton" Grid.Row="3" Grid.Column="1" Click="ProjectsButton_Click" Content="Projects" Style="{StaticResource NavLabelButtonStyle}" />
+
+          <Button x:Name="TimesheetsIconButton" Grid.Row="4" Grid.Column="0" Click="TimesheetsButton_Click" Content="&#xE823;" Style="{StaticResource NavIconButtonStyle}" />
+          <Button x:Name="TimesheetsLabelButton" Grid.Row="4" Grid.Column="1" Click="TimesheetsButton_Click" Content="Time sheets" Style="{StaticResource NavLabelButtonStyle}" />
+
+          <Button x:Name="ReportsIconButton" Grid.Row="5" Grid.Column="0" Click="ReportsButton_Click" Content="&#xE9D2;" Style="{StaticResource NavIconButtonStyle}" />
+          <Button x:Name="ReportsLabelButton" Grid.Row="5" Grid.Column="1" Click="ReportsButton_Click" Content="Reports" Style="{StaticResource NavLabelButtonStyle}" />
+
+          <Button x:Name="InvoicesIconButton" Grid.Row="6" Grid.Column="0" Click="InvoicesButton_Click" Content="&#xE8A5;" Style="{StaticResource NavIconButtonStyle}" />
+          <Button x:Name="InvoicesLabelButton" Grid.Row="6" Grid.Column="1" Click="InvoicesButton_Click" Content="Invoices" Style="{StaticResource NavLabelButtonStyle}" />
+
+          <Button x:Name="ArchiveIconButton" Grid.Row="7" Grid.Column="0" Click="ArchiveButton_Click" Content="&#xE8B7;" Style="{StaticResource NavIconButtonStyle}" />
+          <Button x:Name="ArchiveLabelButton" Grid.Row="7" Grid.Column="1" Click="ArchiveButton_Click" Content="Archive" Style="{StaticResource NavLabelButtonStyle}" />
+        </Grid>
+
+        <Button
+          x:Name="SettingsIconButton"
+          Grid.Row="2"
+          Grid.Column="0"
+          Click="SettingsButton_Click"
+          Content="&#xE713;"
+          Style="{StaticResource NavIconButtonStyle}" />
+        <Button
+          x:Name="SettingsLabelButton"
+          Grid.Row="2"
+          Grid.Column="1"
+          Click="SettingsButton_Click"
+          Content="Settings"
+          Style="{StaticResource NavLabelButtonStyle}" />
+      </Grid>
+    </Border>
+
+    <Grid Grid.Column="1">
       <Grid.RowDefinitions>
-        <RowDefinition Height="50" />
-        <RowDefinition Height="50" />
-        <RowDefinition Height="50" />
-        <RowDefinition Height="50" />
-        <RowDefinition Height="50" />
-        <RowDefinition Height="50" />
-        <RowDefinition Height="50" />
-        <RowDefinition Height="50" />
-        <RowDefinition Height="50" />
-        <RowDefinition Height="50" />
+        <RowDefinition Height="86" />
+        <RowDefinition Height="*" />
       </Grid.RowDefinitions>
-      <Grid.ColumnDefinitions>
-        <ColumnDefinition Width="50" />
-        <ColumnDefinition />
-      </Grid.ColumnDefinitions>
-      <Button
-        x:Name="HamburgerButton"
+
+      <Grid
         Grid.Row="0"
-        Grid.Column="0"
-        Margin="0,0,0,0"
-        HorizontalAlignment="Center"
-        Click="HamburgerButton_Click"
-        Content="&#xE700;"
-        FontSize="22"
-        Foreground="White"
-        Style="{StaticResource NavBarIconButtonStyle}" />
-      <Button
+        Margin="28,18,28,0">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+        <StackPanel VerticalAlignment="Center">
+          <Label
+            x:Name="HeaderLabel"
+            Padding="0"
+            d:Content="Dashboard"
+            FontSize="28"
+            FontWeight="SemiBold"
+            Foreground="{StaticResource PrimaryTextBrush}" />
+          <TextBlock
+            x:Name="HeaderSubLabel"
+            Margin="1,4,0,0"
+            Foreground="{StaticResource SecondaryTextBrush}"
+            Text="At a glance"
+            TextWrapping="Wrap" />
+        </StackPanel>
+        <ContentControl
+          x:Name="HeaderCenterContent"
+          Grid.Column="1"
+          VerticalAlignment="Center" />
+        <Button
+          x:Name="StartStopButton"
+          Grid.Column="3"
+          MinWidth="118"
+          Height="38"
+          VerticalAlignment="Center"
+          Click="StartStopButton_Click"
+          Content="Start"
+          Style="{StaticResource PrimaryButtonStyle}" />
+      </Grid>
+
+      <Grid
+        x:Name="mainContentGrid"
         Grid.Row="1"
-        Grid.Column="0"
-        Click="JobsButton_Click"
-        Content="&#xE821;"
-        Style="{StaticResource NavBarIconButtonStyle}" />
-      <Button
-        x:Name="JobsLabelButton"
-        Grid.Row="1"
-        Grid.Column="1"
-        HorizontalAlignment="Left"
-        Click="JobsButton_Click"
-        Content="Jobs"
-        Style="{StaticResource NavBarButtonStyle}" />
-      <Button
-        Grid.Row="2"
-        Grid.Column="0"
-        Click="ClientsButton_Click"
-        Content="&#xE716;"
-        Style="{StaticResource NavBarIconButtonStyle}" />
-      <Button
-        x:Name="ClientsLabelButton"
-        Grid.Row="2"
-        Grid.Column="1"
-        HorizontalAlignment="Left"
-        Click="ClientsButton_Click"
-        Content="Clients"
-        Style="{StaticResource NavBarButtonStyle}" />
-      <Button
-        Grid.Row="3"
-        Grid.Column="0"
-        Click="ProjectsButton_Click"
-        Content="&#xE7C4;"
-        Style="{StaticResource NavBarIconButtonStyle}" />
-      <Button
-        x:Name="ProjectsLabelButton"
-        Grid.Row="3"
-        Grid.Column="1"
-        HorizontalAlignment="Left"
-        Click="ProjectsButton_Click"
-        Content="Projects"
-        Style="{StaticResource NavBarButtonStyle}" />
-      <Button
-        Grid.Row="4"
-        Grid.Column="0"
-        Click="TimesheetsButton_Click"
-        Content="&#xEC92;"
-        Style="{StaticResource NavBarIconButtonStyle}" />
-      <Button
-        x:Name="TimesheetsLabelButton"
-        Grid.Row="4"
-        Grid.Column="1"
-        HorizontalAlignment="Left"
-        Click="TimesheetsButton_Click"
-        Content="Time sheets"
-        Style="{StaticResource NavBarButtonStyle}" />
-      <Button
-        Grid.Row="5"
-        Grid.Column="0"
-        Click="ReportsButton_Click"
-        Content="&#xE9D2;"
-        Style="{StaticResource NavBarIconButtonStyle}" />
-      <Button
-        x:Name="ReportsLabelButton"
-        Grid.Row="5"
-        Grid.Column="1"
-        HorizontalAlignment="Left"
-        Click="ReportsButton_Click"
-        Content="Reports"
-        Style="{StaticResource NavBarButtonStyle}" />
-      <Button
-        Grid.Row="6"
-        Grid.Column="0"
-        Click="InvoicesButton_Click"
-        Content="&#xE8A5;"
-        Style="{StaticResource NavBarIconButtonStyle}" />
-      <Button
-        x:Name="InvoicesLabelButton"
-        Grid.Row="6"
-        Grid.Column="1"
-        HorizontalAlignment="Left"
-        Click="InvoicesButton_Click"
-        Content="Invoices"
-        Style="{StaticResource NavBarButtonStyle}" />
-      <Button
-        Grid.Row="7"
-        Grid.Column="0"
-        Click="ArchiveButton_Click"
-        Content="&#xE8B7;"
-        Style="{StaticResource NavBarIconButtonStyle}" />
-      <Button
-        x:Name="ArchiveLabelButton"
-        Grid.Row="7"
-        Grid.Column="1"
-        HorizontalAlignment="Left"
-        Click="ArchiveButton_Click"
-        Content="Archive"
-        Style="{StaticResource NavBarButtonStyle}" />
-      <Button
-        Grid.Row="9"
-        Grid.Column="0"
-        Content="&#xE713;"
-        Style="{StaticResource NavBarIconButtonStyle}" />
-      <Button
-        Grid.Row="9"
-        Grid.Column="1"
-        x:Name="SettingsLabelButton"
-        HorizontalAlignment="Left"
-        Click="SettingsButton_Click"
-        Content="Settings"
-        Style="{StaticResource NavBarButtonStyle}" />
+        Margin="28,8,28,28" />
     </Grid>
-    <!--  end of navbar  -->
-
-    <!--  header grid  -->
-    <Grid
-      Grid.Column="1"
-      Height="50"
-      VerticalAlignment="Top"
-      Background="Black">
-      <Grid.ColumnDefinitions>
-        <ColumnDefinition />
-        <ColumnDefinition Width="150" />
-      </Grid.ColumnDefinitions>
-      <Label
-        x:Name="HeaderLabel"
-        Grid.Column="0"
-        Margin="10,0,0,0"
-        d:Content="Header Label"
-        FontSize="28"
-        FontWeight="Light"
-        Foreground="White" />
-      <Button
-        x:Name="StartStopButton"
-        Grid.Column="1"
-        Margin="5"
-        Background="#00AA00"
-        Click="StartStopButton_Click"
-        Content="Start"
-        FontSize="24"
-        Foreground="White" />
-    </Grid>
-    <!--  end of header grid  -->
-
-    <!--  content  -->
-    <Grid
-      x:Name="mainContentGrid"
-      Grid.Column="1"
-      Margin="0,50,0,0">
-      <ScrollViewer>
-        <controls:WorkEntriesListControl x:Name="workEntriesListControl" />
-      </ScrollViewer>
-    </Grid>
-    <!--  end of content  -->
-
   </Grid>
-  <!--  end of main grid  -->
 </Window>

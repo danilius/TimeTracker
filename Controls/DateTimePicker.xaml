@@ -11,7 +11,7 @@
   DataContextChanged="this_DataContextChanged"
   mc:Ignorable="d">
 
-  <Grid>
+  <Grid Height="42">
     <Grid.ColumnDefinitions>
       <ColumnDefinition Width="Auto" />
       <ColumnDefinition Width="Auto" />
@@ -20,14 +20,31 @@
     <DatePicker
       x:Name="DatePickerControl"
       Grid.Column="0"
+      Height="42"
+      VerticalContentAlignment="Center"
       SelectedDate="{Binding SelectedDate, Mode=TwoWay, RelativeSource={RelativeSource FindAncestor, AncestorType={x:Type local:DateTimePicker}}}" />
     <StackPanel
       Grid.Column="1"
       Margin="5,0,0,0"
+      VerticalAlignment="Center"
       Orientation="Horizontal">
-      <ComboBox x:Name="HourComboBox" SelectedIndex="{Binding SelectedHour, RelativeSource={RelativeSource FindAncestor, AncestorType={x:Type local:DateTimePicker}}}" />
-      <TextBlock Margin="5,0,5,0" Text=":" />
-      <ComboBox x:Name="MinuteComboBox" SelectedIndex="{Binding SelectedMinute, RelativeSource={RelativeSource FindAncestor, AncestorType={x:Type local:DateTimePicker}}}" />
+      <ComboBox
+        x:Name="HourComboBox"
+        Width="62"
+        Height="42"
+        VerticalContentAlignment="Center"
+        SelectedIndex="{Binding SelectedHour, RelativeSource={RelativeSource FindAncestor, AncestorType={x:Type local:DateTimePicker}}}" />
+      <TextBlock
+        Margin="8,0"
+        VerticalAlignment="Center"
+        FontSize="16"
+        Text=":" />
+      <ComboBox
+        x:Name="MinuteComboBox"
+        Width="62"
+        Height="42"
+        VerticalContentAlignment="Center"
+        SelectedIndex="{Binding SelectedMinute, RelativeSource={RelativeSource FindAncestor, AncestorType={x:Type local:DateTimePicker}}}" />
     </StackPanel>
   </Grid>
 </UserControl>

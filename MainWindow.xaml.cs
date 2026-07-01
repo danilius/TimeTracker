@@ -9,6 +9,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Data;
 using System.Windows.Documents;
 using System.Windows.Media;
@@ -25,6 +26,7 @@ namespace TimeTracker
   {
     private readonly TimeTrackerModel timeTracker = TimeTrackerModel.Instance;
     private bool isNavCollapsed;
+    private const string DashboardPage = "Dashboard";
     private const string JobsPage = "Jobs";
     private const string ClientsPage = "Clients";
     private const string ProjectsPage = "Projects";
@@ -33,12 +35,24 @@ namespace TimeTracker
     private const string InvoicesPage = "Invoices";
     private const string ArchivePage = "Archive";
     private const string SettingsPage = "Settings";
+    private DashboardPeriodMode dashboardPeriodMode = DashboardPeriodMode.Week;
+    private DateTime dashboardAnchorDate = DateTime.Today;
+    private Popup? dashboardDatePopup;
+    private readonly System.Windows.Threading.DispatcherTimer jobsPageTimer = new() { Interval = TimeSpan.FromSeconds(1) };
+    private TextBlock? jobsActiveTimerTextBlock;
+    private static readonly Brush AccentBrush = BrushFromHex("#0090EE");
+    private static readonly Brush PrimaryTextBrush = BrushFromHex("#17212B");
+    private static readonly Brush SecondaryTextBrush = BrushFromHex("#64707D");
+    private static readonly Brush PanelBorderBrush = BrushFromHex("#D9E0E7");
+    private static readonly Brush SuccessBrush = BrushFromHex("#1F9D61");
+    private static readonly Brush WarningBrush = BrushFromHex("#D98B16");
 
     public MainWindow()
     {
       InitializeComponent();
 
       timeTracker.RunningWorkChanged += TimeTracker_RunningWorkChanged;
+      jobsPageTimer.Tick += JobsPageTimer_Tick;
 
       RestoreWindowState();
       RestoreNavigationState();
@@ -83,11 +97,32 @@ namespace TimeTracker
     private void TimeTracker_RunningWorkChanged(object? sender, EventArgs e)
     {
       UpdateStartStopButton();
+      UpdateJobsTimerText();
+    }
+
+    private void JobsPageTimer_Tick(object? sender, EventArgs e)
+    {
+      UpdateJobsTimerText();
+    }
+
+    private void UpdateJobsTimerText()
+    {
+      if (jobsActiveTimerTextBlock != null && timeTracker.CurrentWorkEntry != null)
+      {
+        jobsActiveTimerTextBlock.Text = FormatDurationClock(timeTracker.CurrentWorkEntry.Duration);
+      }
     }
 
     private void UpdateStartStopButton()
     {
       StartStopButton.Content = timeTracker.HasRunningWork ? "Stop" : "Start";
+      StartStopButton.Background = timeTracker.HasRunningWork ? BrushFromHex("#D14343") : AccentBrush;
+      StartStopButton.BorderBrush = StartStopButton.Background;
+    }
+
+    private void DashboardButton_Click(object sender, RoutedEventArgs e)
+    {
+      ShowDashboard();
     }
 
     private void JobsButton_Click(object sender, RoutedEventArgs e)
@@ -148,9 +183,11 @@ namespace TimeTracker
     private void ApplyNavigationState()
     {
 
-      NavColumn.Width = new GridLength(isNavCollapsed ? 50 : 200);
+      NavColumn.Width = new GridLength(isNavCollapsed ? 50 : 220);
 
       Visibility labelVisibility = isNavCollapsed ? Visibility.Collapsed : Visibility.Visible;
+      AppTitleLabel.Visibility = labelVisibility;
+      DashboardLabelButton.Visibility = labelVisibility;
       JobsLabelButton.Visibility = labelVisibility;
       ClientsLabelButton.Visibility = labelVisibility;
       ProjectsLabelButton.Visibility = labelVisibility;
@@ -159,6 +196,67 @@ namespace TimeTracker
       InvoicesLabelButton.Visibility = labelVisibility;
       ArchiveLabelButton.Visibility = labelVisibility;
       SettingsLabelButton.Visibility = labelVisibility;
+    }
+
+    private void UpdateSelectedNav(string page)
+    {
+      ResetNavButton(DashboardIconButton, DashboardLabelButton);
+      ResetNavButton(JobsIconButton, JobsLabelButton);
+      ResetNavButton(ClientsIconButton, ClientsLabelButton);
+      ResetNavButton(ProjectsIconButton, ProjectsLabelButton);
+      ResetNavButton(TimesheetsIconButton, TimesheetsLabelButton);
+      ResetNavButton(ReportsIconButton, ReportsLabelButton);
+      ResetNavButton(InvoicesIconButton, InvoicesLabelButton);
+      ResetNavButton(ArchiveIconButton, ArchiveLabelButton);
+      ResetNavButton(SettingsIconButton, SettingsLabelButton);
+
+      switch (page)
+      {
+        case DashboardPage:
+          SelectNavButton(DashboardIconButton, DashboardLabelButton);
+          break;
+        case JobsPage:
+          SelectNavButton(JobsIconButton, JobsLabelButton);
+          break;
+        case ClientsPage:
+          SelectNavButton(ClientsIconButton, ClientsLabelButton);
+          break;
+        case ProjectsPage:
+          SelectNavButton(ProjectsIconButton, ProjectsLabelButton);
+          break;
+        case TimesheetsPage:
+          SelectNavButton(TimesheetsIconButton, TimesheetsLabelButton);
+          break;
+        case ReportsPage:
+          SelectNavButton(ReportsIconButton, ReportsLabelButton);
+          break;
+        case InvoicesPage:
+          SelectNavButton(InvoicesIconButton, InvoicesLabelButton);
+          break;
+        case ArchivePage:
+          SelectNavButton(ArchiveIconButton, ArchiveLabelButton);
+          break;
+        case SettingsPage:
+          SelectNavButton(SettingsIconButton, SettingsLabelButton);
+          break;
+      }
+    }
+
+    private static void SelectNavButton(Button iconButton, Button labelButton)
+    {
+      Brush selectedBackground = BrushFromHex("#122232");
+      iconButton.Background = selectedBackground;
+      labelButton.Background = selectedBackground;
+      iconButton.Foreground = Brushes.White;
+      labelButton.Foreground = Brushes.White;
+    }
+
+    private static void ResetNavButton(Button iconButton, Button labelButton)
+    {
+      iconButton.Background = Brushes.Transparent;
+      labelButton.Background = Brushes.Transparent;
+      iconButton.Foreground = BrushFromHex("#C8D1DC");
+      labelButton.Foreground = BrushFromHex("#C8D1DC");
     }
 
     private void RestoreWindowState()
@@ -196,12 +294,22 @@ namespace TimeTracker
     {
       TTAppSettings.Instance.CurrentPage = page;
       TTAppSettings.Instance.Save();
+      if (page != JobsPage)
+      {
+        jobsPageTimer.Stop();
+        jobsActiveTimerTextBlock = null;
+      }
+      UpdateSelectedNav(page);
     }
 
     private void ShowSavedPage()
     {
       switch (TTAppSettings.Instance.CurrentPage)
       {
+        case DashboardPage:
+          ShowDashboard();
+          break;
+
         case ClientsPage:
           ShowClients();
           break;
@@ -231,33 +339,1407 @@ namespace TimeTracker
           break;
 
         case JobsPage:
-        default:
           ShowHome();
+          break;
+
+        default:
+          ShowDashboard();
           break;
       }
     }
 
+    private void ShowDashboard()
+    {
+      SaveCurrentPage(DashboardPage);
+
+      DateTime periodStart = GetDashboardPeriodStart();
+      DateTime periodEnd = GetDashboardPeriodEnd(periodStart);
+      List<WorkEntry> periodEntries = timeTracker.WorkEntries
+        .Where(workEntry => workEntry.StartTime.Date >= periodStart && workEntry.StartTime.Date <= periodEnd)
+        .OrderByDescending(workEntry => workEntry.StartTime)
+        .ToList();
+
+      double totalHours = TimeTrackerModel.CalculateHoursTotal(periodEntries);
+      decimal totalEarned = TimeTrackerModel.CalculateTotal(periodEntries);
+      string currency = TimeTrackerModel.GetCurrencySummary(periodEntries);
+      double averagePerWorkedDay = periodEntries
+        .GroupBy(workEntry => workEntry.StartTime.Date)
+        .Where(group => group.Sum(workEntry => workEntry.Duration.TotalHours) > 0)
+        .DefaultIfEmpty()
+        .Average(group => group?.Sum(workEntry => workEntry.Duration.TotalHours) ?? 0);
+
+      HeaderLabel.Content = "Dashboard";
+      HeaderSubLabel.Text = string.Empty;
+      HeaderSubLabel.Visibility = Visibility.Collapsed;
+      StartStopButton.Visibility = Visibility.Collapsed;
+      HeaderCenterContent.Content = CreateDashboardPeriodToolbar(periodStart, periodEnd);
+
+      Grid page = new();
+      page.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+      page.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+      page.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+      Grid metricsRow = CreateDashboardTwoColumnGrid(new Thickness(0, 0, 0, 16));
+      UniformGrid leftMetrics = new()
+      {
+        Columns = 2,
+        Margin = new Thickness(0)
+      };
+      leftMetrics.Children.Add(CreateMetricTile("Hours", $"{totalHours:0.#}h", "Logged this week", DashboardMetricIcon.Hours, AccentBrush, new Thickness(0, 0, 8, 0)));
+      leftMetrics.Children.Add(CreateMetricTile("Earnings", $"{currency} {totalEarned:0.00}".Trim(), "Estimated from rates", DashboardMetricIcon.Earnings, SuccessBrush, new Thickness(8, 0, 0, 0)));
+      metricsRow.Children.Add(leftMetrics);
+
+      UniformGrid rightMetrics = new()
+      {
+        Columns = 2,
+        Margin = new Thickness(16, 0, 0, 0)
+      };
+      rightMetrics.Children.Add(CreateMetricTile("Billable entries", periodEntries.Count.ToString(), "Work entries", DashboardMetricIcon.BillableEntries, WarningBrush, new Thickness(0, 0, 8, 0)));
+      rightMetrics.Children.Add(CreateMetricTile("Avg/day", $"{averagePerWorkedDay:0.#}h", "Worked days", DashboardMetricIcon.AvgDay, BrushFromHex("#5E6AD2"), new Thickness(8, 0, 0, 0)));
+      Grid.SetColumn(rightMetrics, 1);
+      metricsRow.Children.Add(rightMetrics);
+      page.Children.Add(metricsRow);
+
+      Grid topPanels = CreateDashboardTwoColumnGrid(new Thickness(0, 0, 0, 16));
+      Border dailyHoursPanel = CreateDailyHoursPanel(periodStart, periodEntries);
+      topPanels.Children.Add(dailyHoursPanel);
+      Border byClientPanel = CreateBreakdownPanel(periodEntries);
+      byClientPanel.Margin = new Thickness(16, 0, 0, 0);
+      Grid.SetColumn(byClientPanel, 1);
+      topPanels.Children.Add(byClientPanel);
+      Grid.SetRow(topPanels, 1);
+      page.Children.Add(topPanels);
+
+      Grid bottom = CreateDashboardTwoColumnGrid(new Thickness(0));
+      bottom.Children.Add(CreateRecentWorkPanel(periodEntries));
+      Border invoicePanel = CreateReadyToInvoicePanel(periodEntries);
+      invoicePanel.Margin = new Thickness(16, 0, 0, 0);
+      Grid.SetColumn(invoicePanel, 1);
+      bottom.Children.Add(invoicePanel);
+      Grid.SetRow(bottom, 2);
+      page.Children.Add(bottom);
+
+      ShowMainContent(page);
+    }
+
+    private static DateTime GetStartOfWeek(DateTime date, DayOfWeek weekStartsOn)
+    {
+      int diff = (7 + (date.DayOfWeek - weekStartsOn)) % 7;
+      return date.Date.AddDays(-diff);
+    }
+
+    private DateTime GetDashboardPeriodStart()
+    {
+      return dashboardPeriodMode == DashboardPeriodMode.Week
+        ? GetStartOfWeek(dashboardAnchorDate, TTAppSettings.Instance.WeekStartsOn)
+        : new DateTime(dashboardAnchorDate.Year, dashboardAnchorDate.Month, 1);
+    }
+
+    private DateTime GetDashboardPeriodEnd(DateTime periodStart)
+    {
+      return dashboardPeriodMode == DashboardPeriodMode.Week
+        ? periodStart.AddDays(6)
+        : periodStart.AddMonths(1).AddDays(-1);
+    }
+
+    private void MoveDashboardPeriod(int direction)
+    {
+      dashboardAnchorDate = dashboardPeriodMode == DashboardPeriodMode.Week
+        ? dashboardAnchorDate.AddDays(7 * direction)
+        : dashboardAnchorDate.AddMonths(direction);
+      ShowDashboard();
+    }
+
+    private void SetDashboardPeriodMode(DashboardPeriodMode periodMode)
+    {
+      dashboardPeriodMode = periodMode;
+      ShowDashboard();
+    }
+
+    private static Grid CreateDashboardTwoColumnGrid(Thickness margin)
+    {
+      Grid grid = new()
+      {
+        Margin = margin
+      };
+      grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+      grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+      return grid;
+    }
+
+    private static Grid CreateMetricAndPanelCell(UniformGrid metrics, Border panel)
+    {
+      Grid cell = new();
+      cell.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+      cell.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+      cell.Children.Add(metrics);
+      Grid.SetRow(panel, 1);
+      panel.VerticalAlignment = VerticalAlignment.Stretch;
+      cell.Children.Add(panel);
+      return cell;
+    }
+
+    private DockPanel CreateDashboardPeriodToolbar(DateTime periodStart, DateTime periodEnd)
+    {
+      DockPanel toolbar = new()
+      {
+        LastChildFill = false,
+        HorizontalAlignment = HorizontalAlignment.Center
+      };
+
+      StackPanel rangeControls = new()
+      {
+        Orientation = Orientation.Horizontal,
+        VerticalAlignment = VerticalAlignment.Center
+      };
+      rangeControls.Children.Add(CreateIconControlButton("\uE76B", (_, _) => MoveDashboardPeriod(-1)));
+      Button dateButton = CreateDashboardDateButton(periodStart, periodEnd);
+      rangeControls.Children.Add(dateButton);
+      rangeControls.Children.Add(CreateIconControlButton("\uE76C", (_, _) => MoveDashboardPeriod(1)));
+
+      StackPanel periodButtons = new()
+      {
+        Orientation = Orientation.Horizontal,
+        HorizontalAlignment = HorizontalAlignment.Right,
+        Margin = new Thickness(14, 0, 0, 0)
+      };
+      periodButtons.Children.Add(CreateSegmentButton("Week", dashboardPeriodMode == DashboardPeriodMode.Week, (_, _) => SetDashboardPeriodMode(DashboardPeriodMode.Week)));
+      periodButtons.Children.Add(CreateSegmentButton("Month", dashboardPeriodMode == DashboardPeriodMode.Month, (_, _) => SetDashboardPeriodMode(DashboardPeriodMode.Month)));
+      DockPanel.SetDock(periodButtons, Dock.Right);
+
+      toolbar.Children.Add(periodButtons);
+      toolbar.Children.Add(rangeControls);
+      return toolbar;
+    }
+
+    private Button CreateDashboardDateButton(DateTime periodStart, DateTime periodEnd)
+    {
+      Button button = new()
+      {
+        Content = $"{FormatDate(periodStart)} - {FormatDate(periodEnd)}",
+        Background = Brushes.White,
+        BorderBrush = PanelBorderBrush,
+        BorderThickness = new Thickness(1),
+        Foreground = PrimaryTextBrush,
+        FontSize = 14,
+        FontWeight = FontWeights.SemiBold,
+        Height = 38,
+        MinWidth = 210,
+        Margin = new Thickness(6, 0, 6, 0),
+        Padding = new Thickness(18, 0, 18, 0)
+      };
+      button.Click += (_, _) => ToggleDashboardDatePopup(button);
+      return button;
+    }
+
+    private void ToggleDashboardDatePopup(Button placementTarget)
+    {
+      if (dashboardDatePopup?.IsOpen == true)
+      {
+        dashboardDatePopup.IsOpen = false;
+        return;
+      }
+
+      System.Windows.Controls.Calendar calendar = new()
+      {
+        SelectedDate = dashboardAnchorDate,
+        DisplayDate = dashboardAnchorDate,
+        Margin = new Thickness(8)
+      };
+      calendar.SelectedDatesChanged += (_, _) =>
+      {
+        if (calendar.SelectedDate == null)
+        {
+          return;
+        }
+
+        dashboardAnchorDate = calendar.SelectedDate.Value.Date;
+        if (dashboardDatePopup != null)
+        {
+          dashboardDatePopup.IsOpen = false;
+        }
+        ShowDashboard();
+      };
+
+      Border popupChrome = new()
+      {
+        Background = Brushes.White,
+        BorderBrush = PanelBorderBrush,
+        BorderThickness = new Thickness(1),
+        CornerRadius = new CornerRadius(8),
+        Child = calendar
+      };
+
+      dashboardDatePopup = new Popup
+      {
+        PlacementTarget = placementTarget,
+        Placement = PlacementMode.Bottom,
+        StaysOpen = false,
+        AllowsTransparency = true,
+        Child = popupChrome
+      };
+      dashboardDatePopup.IsOpen = true;
+    }
+
+    private static Button CreateIconControlButton(string icon, RoutedEventHandler handler)
+    {
+      Button button = new()
+      {
+        Content = icon,
+        Margin = new Thickness(0)
+      };
+      ApplyStyle(button, "IconButtonStyle");
+      button.Click += handler;
+      return button;
+    }
+
+    private static Border CreateMetricTile(string label, string value, string note, DashboardMetricIcon icon, Brush accent, Thickness margin)
+    {
+      Border tile = CreatePanelBorder(margin);
+      Grid content = new();
+      content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+      content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+      FrameworkElement iconElement = CreateDashboardMetricIcon(icon);
+      iconElement.Margin = new Thickness(0, 4, 14, 0);
+      content.Children.Add(iconElement);
+
+      StackPanel textContent = new();
+      textContent.Children.Add(new TextBlock
+      {
+        Text = label,
+        Foreground = SecondaryTextBrush,
+        FontSize = 12,
+        FontWeight = FontWeights.SemiBold
+      });
+      textContent.Children.Add(new TextBlock
+      {
+        Text = value,
+        Foreground = PrimaryTextBrush,
+        FontSize = 26,
+        FontWeight = FontWeights.SemiBold,
+        Margin = new Thickness(0, 6, 0, 2)
+      });
+      textContent.Children.Add(new TextBlock
+      {
+        Text = note,
+        Foreground = SecondaryTextBrush,
+        FontSize = 12
+      });
+      textContent.Children.Add(new Border
+      {
+        Height = 3,
+        Width = 42,
+        Background = accent,
+        CornerRadius = new CornerRadius(2),
+        HorizontalAlignment = HorizontalAlignment.Left,
+        Margin = new Thickness(0, 12, 0, 0)
+      });
+      Grid.SetColumn(textContent, 1);
+      content.Children.Add(textContent);
+      tile.Child = content;
+      return tile;
+    }
+
+    private static FrameworkElement CreateDashboardMetricIcon(DashboardMetricIcon icon)
+    {
+      Brush stroke = BrushFromHex("#0079E7");
+      Canvas canvas = icon == DashboardMetricIcon.BillableEntries
+        ? CreateIconCanvas(10.258305, 13.202387)
+        : icon == DashboardMetricIcon.AvgDay
+          ? CreateIconCanvas(13.4324, 13.202396)
+          : CreateIconCanvas(13.294396, 13.202396);
+
+      switch (icon)
+      {
+        case DashboardMetricIcon.Hours:
+          canvas.Children.Add(CreateIconEllipse(6.647198, 6.601193, 6.2396092, 6.1936069, 0.815179, stroke));
+          canvas.Children.Add(CreateIconPath("m 35.097412,61.607805 v 3.553137 l 2.17954,1.651326", -28.612854, -58.559749, 0.868627, stroke));
+          break;
+
+        case DashboardMetricIcon.Earnings:
+          canvas.Children.Add(CreateIconEllipse(6.647192, 6.601193, 6.2396092, 6.1936069, 0.815179, stroke));
+          TextBlock poundText = new()
+          {
+            Text = "£",
+            Foreground = stroke,
+            FontFamily = new FontFamily("Georgia"),
+            FontWeight = FontWeights.Bold,
+            FontSize = 8.55,
+            LineHeight = 8.55
+          };
+          canvas.Children.Add(poundText);
+          Canvas.SetLeft(poundText, 4.16);
+          Canvas.SetTop(poundText, 1.55);
+          break;
+
+        case DashboardMetricIcon.BillableEntries:
+          canvas.Children.Add(CreateIconRectangle(0.40391, 0.403908, 9.4504986, 12.394573, 0.807816, stroke));
+          canvas.Children.Add(CreateIconPath("m 171.45446,62.527306 h 4.81412", -168.68702, -58.559753, 0.868627, stroke));
+          canvas.Children.Add(CreateIconPath("m 171.45446,65.173138 h 4.81412", -168.68702, -58.559753, 0.868627, stroke));
+          canvas.Children.Add(CreateIconPath("m 171.45446,67.818969 h 3.16077", -168.68702, -58.559753, 0.868625, stroke));
+          break;
+
+        case DashboardMetricIcon.AvgDay:
+          canvas.Children.Add(CreateIconEllipse(6.71619, 6.601193, 6.3086104, 6.1936069, 0.815179, stroke));
+          canvas.Children.Add(CreateIconPath("m 240.12082,65.868959 h 1.91914 l 1.20353,-3.25279 1.66781,5.920076 1.2597,-3.67565 0.61803,0.878253 h 2.69982", -238.19511, -58.559749, 0.868627, stroke));
+          break;
+      }
+
+      return new Viewbox
+      {
+        Width = 42,
+        Height = 42,
+        Stretch = Stretch.Uniform,
+        Child = canvas
+      };
+    }
+
+    private static Canvas CreateIconCanvas(double width, double height)
+    {
+      return new Canvas
+      {
+        Width = width,
+        Height = height
+      };
+    }
+
+    private static System.Windows.Shapes.Ellipse CreateIconEllipse(double centerX, double centerY, double radiusX, double radiusY, double strokeThickness, Brush stroke)
+    {
+      System.Windows.Shapes.Ellipse ellipse = new()
+      {
+        Width = radiusX * 2,
+        Height = radiusY * 2,
+        Fill = Brushes.Transparent,
+        Stroke = stroke,
+        StrokeThickness = strokeThickness
+      };
+      Canvas.SetLeft(ellipse, centerX - radiusX);
+      Canvas.SetTop(ellipse, centerY - radiusY);
+      return ellipse;
+    }
+
+    private static System.Windows.Shapes.Rectangle CreateIconRectangle(double x, double y, double width, double height, double strokeThickness, Brush stroke)
+    {
+      System.Windows.Shapes.Rectangle rectangle = new()
+      {
+        Width = width,
+        Height = height,
+        Fill = Brushes.Transparent,
+        Stroke = stroke,
+        StrokeThickness = strokeThickness,
+        StrokeLineJoin = PenLineJoin.Round
+      };
+      Canvas.SetLeft(rectangle, x);
+      Canvas.SetTop(rectangle, y);
+      return rectangle;
+    }
+
+    private static System.Windows.Shapes.Path CreateIconPath(string data, double translateX, double translateY, double strokeThickness, Brush stroke)
+    {
+      return new System.Windows.Shapes.Path
+      {
+        Data = Geometry.Parse(data),
+        Fill = Brushes.Transparent,
+        Stroke = stroke,
+        StrokeThickness = strokeThickness,
+        StrokeStartLineCap = PenLineCap.Round,
+        StrokeEndLineCap = PenLineCap.Round,
+        StrokeLineJoin = PenLineJoin.Round,
+        RenderTransform = new TranslateTransform(translateX, translateY)
+      };
+    }
+
+    private static Border CreateDailyHoursPanel(DateTime periodStart, List<WorkEntry> entries)
+    {
+      Border panel = CreatePanelBorder();
+      StackPanel content = new();
+      content.Children.Add(CreateSectionTitle("Daily hours", "Hours logged by day"));
+
+      UniformGrid chart = new()
+      {
+        Columns = 7,
+        Margin = new Thickness(0, 18, 0, 0),
+        MinHeight = 190
+      };
+
+      List<double> dayTotals = Enumerable.Range(0, 7)
+        .Select(offset => entries.Where(entry => entry.StartTime.Date == periodStart.AddDays(offset)).Sum(entry => entry.Duration.TotalHours))
+        .ToList();
+      double maxHours = Math.Max(1, dayTotals.Max());
+
+      for (int i = 0; i < 7; i++)
+      {
+        DateTime day = periodStart.AddDays(i);
+        double hours = dayTotals[i];
+        StackPanel dayPanel = new()
+        {
+          Margin = new Thickness(4, 0, 4, 0),
+          VerticalAlignment = VerticalAlignment.Bottom
+        };
+        dayPanel.Children.Add(new TextBlock
+        {
+          Text = $"{hours:0.#}h",
+          HorizontalAlignment = HorizontalAlignment.Center,
+          Foreground = SecondaryTextBrush,
+          FontSize = 11,
+          Margin = new Thickness(0, 0, 0, 6)
+        });
+        dayPanel.Children.Add(new Border
+        {
+          Height = Math.Max(8, 120 * hours / maxHours),
+          Background = hours > 0 ? AccentBrush : BrushFromHex("#E7ECF1"),
+          CornerRadius = new CornerRadius(5, 5, 2, 2),
+          VerticalAlignment = VerticalAlignment.Bottom
+        });
+        dayPanel.Children.Add(new TextBlock
+        {
+          Text = day.ToString("ddd", CultureInfo.CurrentCulture),
+          HorizontalAlignment = HorizontalAlignment.Center,
+          Foreground = SecondaryTextBrush,
+          FontSize = 12,
+          FontWeight = FontWeights.SemiBold,
+          Margin = new Thickness(0, 8, 0, 0)
+        });
+        chart.Children.Add(dayPanel);
+      }
+
+      content.Children.Add(chart);
+      panel.Child = content;
+      return panel;
+    }
+
+    private static Border CreateBreakdownPanel(List<WorkEntry> entries)
+    {
+      Border panel = CreatePanelBorder();
+      StackPanel content = new();
+      content.Children.Add(CreateSectionTitle("By client", "Top work this period"));
+
+      List<IGrouping<string, WorkEntry>> groups = entries
+        .GroupBy(entry => string.IsNullOrWhiteSpace(entry.ClientName) ? "No client" : entry.ClientName)
+        .OrderByDescending(group => group.Sum(entry => entry.Duration.TotalHours))
+        .Take(5)
+        .ToList();
+      double maxHours = Math.Max(1, groups.Select(group => group.Sum(entry => entry.Duration.TotalHours)).DefaultIfEmpty(0).Max());
+
+      if (groups.Count == 0)
+      {
+        content.Children.Add(CreateEmptyText("No work logged in this period yet."));
+      }
+      else
+      {
+        foreach (IGrouping<string, WorkEntry> group in groups)
+        {
+          double hours = group.Sum(entry => entry.Duration.TotalHours);
+          decimal total = TimeTrackerModel.CalculateTotal(group);
+          string currency = TimeTrackerModel.GetCurrencySummary(group);
+          content.Children.Add(CreateBreakdownRow(group.Key, $"{hours:0.#}h", $"{currency} {total:0.00}".Trim(), hours / maxHours, GetClientBrush(group.Key)));
+        }
+      }
+
+      panel.Child = content;
+      return panel;
+    }
+
+    private static Border CreateRecentWorkPanel(List<WorkEntry> entries)
+    {
+      Border panel = CreatePanelBorder();
+      StackPanel content = new();
+      content.Children.Add(CreateSectionTitle("Recent work", "Latest entries in this period"));
+
+      List<WorkEntry> recentEntries = entries.Take(6).ToList();
+      if (recentEntries.Count == 0)
+      {
+        content.Children.Add(CreateEmptyText("Start a job to see recent work here."));
+      }
+      else
+      {
+        content.Children.Add(CreateRecentWorkHeader());
+        foreach (WorkEntry entry in recentEntries)
+        {
+          content.Children.Add(CreateRecentWorkRow(entry));
+        }
+      }
+
+      panel.Child = content;
+      return panel;
+    }
+
+    private static Border CreateReadyToInvoicePanel(List<WorkEntry> entries)
+    {
+      Border panel = CreatePanelBorder();
+      StackPanel content = new();
+      content.Children.Add(CreateSectionTitle("Ready to invoice", "Estimated unbilled value"));
+
+      List<IGrouping<string, WorkEntry>> groups = entries
+        .GroupBy(entry => $"{(string.IsNullOrWhiteSpace(entry.ClientName) ? "No client" : entry.ClientName)}|{(string.IsNullOrWhiteSpace(entry.ProjectName) ? "No project" : entry.ProjectName)}")
+        .OrderByDescending(group => TimeTrackerModel.CalculateTotal(group))
+        .Take(6)
+        .ToList();
+
+      if (groups.Count == 0)
+      {
+        content.Children.Add(CreateEmptyText("No invoice candidates in this period."));
+      }
+      else
+      {
+        content.Children.Add(CreateInvoiceHeader());
+        foreach (IGrouping<string, WorkEntry> group in groups)
+        {
+          string[] parts = group.Key.Split('|');
+          string clientName = parts.Length > 0 ? parts[0] : "No client";
+          string projectName = parts.Length > 1 ? parts[1] : "No project";
+          content.Children.Add(CreateInvoiceCandidateRow(
+            clientName,
+            projectName,
+            $"{group.Sum(entry => entry.Duration.TotalHours):0.#}h",
+            $"{TimeTrackerModel.GetCurrencySummary(group)} {TimeTrackerModel.CalculateTotal(group):0.00}".Trim(),
+            GetClientBrush(clientName)));
+        }
+      }
+
+      panel.Child = content;
+      return panel;
+    }
+
+    private static TextBlock CreateSectionTitle(string title, string subtitle)
+    {
+      TextBlock text = new()
+      {
+        Foreground = PrimaryTextBrush,
+        FontSize = 17,
+        FontWeight = FontWeights.SemiBold,
+        Text = title
+      };
+      text.Inlines.Add(new LineBreak());
+      text.Inlines.Add(new Run(subtitle)
+      {
+        Foreground = SecondaryTextBrush,
+        FontSize = 12,
+        FontWeight = FontWeights.Normal
+      });
+      return text;
+    }
+
+    private static UIElement CreateBreakdownRow(string label, string hours, string total, double ratio, Brush clientBrush)
+    {
+      StackPanel row = new()
+      {
+        Margin = new Thickness(0, 14, 0, 0)
+      };
+      DockPanel line = new();
+      TextBlock labelText = new()
+      {
+        Text = label,
+        FontWeight = FontWeights.SemiBold,
+        Foreground = PrimaryTextBrush
+      };
+      TextBlock valueText = new()
+      {
+        Text = $"{hours}  {total}",
+        Foreground = SecondaryTextBrush,
+        HorizontalAlignment = HorizontalAlignment.Right
+      };
+      DockPanel.SetDock(valueText, Dock.Right);
+      line.Children.Add(valueText);
+      line.Children.Add(labelText);
+      row.Children.Add(line);
+      Grid barTrack = new()
+      {
+        Height = 8,
+        Margin = new Thickness(0, 7, 0, 0)
+      };
+      barTrack.Children.Add(new Border
+      {
+        Background = BrushFromHex("#EEF2F6"),
+        CornerRadius = new CornerRadius(4)
+      });
+      barTrack.Children.Add(new Border
+      {
+        Width = Math.Max(24, 260 * ratio),
+        Background = clientBrush,
+        CornerRadius = new CornerRadius(4),
+        HorizontalAlignment = HorizontalAlignment.Left
+      });
+      row.Children.Add(barTrack);
+      return row;
+    }
+
+    private static UIElement CreateRecentWorkRow(WorkEntry entry)
+    {
+      Grid row = CreateRecentWorkGridRow();
+      row.Margin = new Thickness(0, 10, 0, 0);
+      row.Children.Add(CreateMiniCell(entry.StartTime.ToString("dd/MM/yyyy", CultureInfo.CurrentCulture), false, HorizontalAlignment.Left));
+      TextBlock client = CreateMiniCell(entry.ClientName, true, HorizontalAlignment.Left);
+      Grid.SetColumn(client, 1);
+      row.Children.Add(client);
+      TextBlock project = CreateMiniCell(entry.ProjectName, false, HorizontalAlignment.Left);
+      Grid.SetColumn(project, 2);
+      row.Children.Add(project);
+      TextBlock task = CreateMiniCell(entry.Description ?? string.Empty, false, HorizontalAlignment.Left);
+      Grid.SetColumn(task, 3);
+      row.Children.Add(task);
+      TextBlock duration = CreateMiniCell($"{entry.Duration.TotalHours:0.#}h", true, HorizontalAlignment.Right);
+      Grid.SetColumn(duration, 4);
+      row.Children.Add(duration);
+      return row;
+    }
+
+    private static UIElement CreateInvoiceCandidateRow(string client, string project, string hours, string total, Brush clientBrush)
+    {
+      Grid row = CreateInvoiceGridRow();
+      row.Margin = new Thickness(0, 12, 0, 0);
+
+      DockPanel clientCell = new();
+      clientCell.Children.Add(new Border
+      {
+        Width = 9,
+        Height = 9,
+        Background = clientBrush,
+        CornerRadius = new CornerRadius(5),
+        Margin = new Thickness(0, 5, 8, 0),
+        VerticalAlignment = VerticalAlignment.Top
+      });
+      clientCell.Children.Add(CreateMiniCell(client, true, HorizontalAlignment.Left));
+      row.Children.Add(clientCell);
+
+      TextBlock projectCell = CreateMiniCell(project, false, HorizontalAlignment.Left);
+      Grid.SetColumn(projectCell, 1);
+      row.Children.Add(projectCell);
+      TextBlock hoursText = CreateMiniCell(hours, false, HorizontalAlignment.Left);
+      Grid.SetColumn(hoursText, 2);
+      row.Children.Add(hoursText);
+      TextBlock totalText = CreateMiniCell(total, true, HorizontalAlignment.Right);
+      totalText.Foreground = SuccessBrush;
+      Grid.SetColumn(totalText, 3);
+      row.Children.Add(totalText);
+      return row;
+    }
+
+    private static UIElement CreateRecentWorkHeader()
+    {
+      Grid header = CreateRecentWorkGridRow();
+      header.Margin = new Thickness(0, 16, 0, 2);
+      AddHeaderCell(header, "Date", 0, HorizontalAlignment.Left);
+      AddHeaderCell(header, "Client", 1, HorizontalAlignment.Left);
+      AddHeaderCell(header, "Project", 2, HorizontalAlignment.Left);
+      AddHeaderCell(header, "Task", 3, HorizontalAlignment.Left);
+      AddHeaderCell(header, "Hours", 4, HorizontalAlignment.Right);
+      return header;
+    }
+
+    private static UIElement CreateInvoiceHeader()
+    {
+      Grid header = CreateInvoiceGridRow();
+      header.Margin = new Thickness(0, 16, 0, 2);
+      AddHeaderCell(header, "Client", 0, HorizontalAlignment.Left);
+      AddHeaderCell(header, "Project", 1, HorizontalAlignment.Left);
+      AddHeaderCell(header, "Uninvoiced hours", 2, HorizontalAlignment.Left);
+      AddHeaderCell(header, "Uninvoiced amount", 3, HorizontalAlignment.Right);
+      return header;
+    }
+
+    private static Grid CreateRecentWorkGridRow()
+    {
+      Grid grid = new();
+      grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.9, GridUnitType.Star) });
+      grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.1, GridUnitType.Star) });
+      grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.2, GridUnitType.Star) });
+      grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star) });
+      grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.7, GridUnitType.Star) });
+      return grid;
+    }
+
+    private static Grid CreateInvoiceGridRow()
+    {
+      Grid grid = new();
+      grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.2, GridUnitType.Star) });
+      grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.3, GridUnitType.Star) });
+      grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.1, GridUnitType.Star) });
+      grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.2, GridUnitType.Star) });
+      return grid;
+    }
+
+    private static void AddHeaderCell(Grid grid, string text, int column, HorizontalAlignment alignment)
+    {
+      TextBlock cell = CreateMiniGridHeaderText(text, alignment);
+      Grid.SetColumn(cell, column);
+      grid.Children.Add(cell);
+    }
+
+    private static TextBlock CreateMiniCell(string text, bool isStrong, HorizontalAlignment alignment)
+    {
+      return new TextBlock
+      {
+        Text = text,
+        FontWeight = isStrong ? FontWeights.SemiBold : FontWeights.Normal,
+        Foreground = isStrong ? PrimaryTextBrush : SecondaryTextBrush,
+        HorizontalAlignment = alignment,
+        VerticalAlignment = VerticalAlignment.Center,
+        TextTrimming = TextTrimming.CharacterEllipsis
+      };
+    }
+
+    private static TextBlock CreateMiniGridHeaderText(string text, HorizontalAlignment alignment)
+    {
+      return new TextBlock
+      {
+        Text = text,
+        Foreground = SecondaryTextBrush,
+        FontSize = 11,
+        FontWeight = FontWeights.SemiBold,
+        HorizontalAlignment = alignment
+      };
+    }
+
+    private static Button CreateSegmentButton(string text, bool isSelected, RoutedEventHandler handler)
+    {
+      Button button = new()
+      {
+        Content = text,
+        Height = 30,
+        MinWidth = 72,
+        Margin = new Thickness(0, 0, 6, 0),
+        Background = isSelected ? AccentBrush : Brushes.White,
+        Foreground = isSelected ? Brushes.White : PrimaryTextBrush,
+        BorderBrush = isSelected ? AccentBrush : PanelBorderBrush,
+        BorderThickness = new Thickness(1),
+        FontWeight = FontWeights.SemiBold
+      };
+      button.Click += handler;
+      return button;
+    }
+
+    private static TextBlock CreateEmptyText(string text)
+    {
+      return new TextBlock
+      {
+        Text = text,
+        Foreground = SecondaryTextBrush,
+        Margin = new Thickness(0, 18, 0, 0),
+        TextWrapping = TextWrapping.Wrap
+      };
+    }
+
+    private static Border CreatePanelBorder()
+    {
+      return CreatePanelBorder(new Thickness(0));
+    }
+
+    private static Border CreatePanelBorder(Thickness margin)
+    {
+      return new Border
+      {
+        Background = Brushes.White,
+        BorderBrush = PanelBorderBrush,
+        BorderThickness = new Thickness(1),
+        CornerRadius = new CornerRadius(8),
+        Padding = new Thickness(16),
+        Margin = margin
+      };
+    }
+
     private void ShowHome()
     {
-      HeaderLabel.Content = "Time Tracker";
+      HeaderLabel.Content = "Jobs";
+      HeaderSubLabel.Visibility = Visibility.Visible;
+      HeaderSubLabel.Text = string.Empty;
+      HeaderSubLabel.Visibility = Visibility.Collapsed;
+      StartStopButton.Visibility = Visibility.Collapsed;
+      HeaderCenterContent.Content = CreateJobsHeaderToolbar();
       SaveCurrentPage(JobsPage);
-
-      Controls.WorkEntriesListControl homeList = new()
+      if (timeTracker.HasRunningWork)
       {
-        DataContext = timeTracker.Clients
+        jobsPageTimer.Start();
+      }
+      else
+      {
+        jobsPageTimer.Stop();
+        jobsActiveTimerTextBlock = null;
+      }
+
+      Grid page = new();
+      page.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+      page.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+      Grid topRow = new()
+      {
+        Margin = new Thickness(0, 0, 0, 16)
       };
+      topRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(3, GridUnitType.Star) });
+      topRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star) });
+      topRow.Children.Add(CreateActiveTimerPanel());
+      Border quickStartPanel = CreateQuickStartPanel();
+      quickStartPanel.Margin = new Thickness(16, 0, 0, 0);
+      Grid.SetColumn(quickStartPanel, 1);
+      topRow.Children.Add(quickStartPanel);
+      page.Children.Add(topRow);
+
+      Border recentJobsPanel = CreateRecentJobsPanel();
+      Grid.SetRow(recentJobsPanel, 1);
+      page.Children.Add(recentJobsPanel);
+
+      ShowMainContent(page);
+    }
+
+    private StackPanel CreateJobsHeaderToolbar()
+    {
+      StackPanel toolbar = new()
+      {
+        Orientation = Orientation.Horizontal,
+        HorizontalAlignment = HorizontalAlignment.Center,
+        VerticalAlignment = VerticalAlignment.Center
+      };
+
+      TextBox searchBox = new()
+      {
+        Text = "Search jobs",
+        Width = 260,
+        Height = 38,
+        Padding = new Thickness(12, 8, 12, 0),
+        Foreground = SecondaryTextBrush,
+        BorderBrush = PanelBorderBrush,
+        BorderThickness = new Thickness(1),
+        Margin = new Thickness(0, 0, 12, 0)
+      };
+      toolbar.Children.Add(searchBox);
+      toolbar.Children.Add(CreateJobsIconButton("\uE71C", (_, _) => { }));
+
+      Button newJobButton = new()
+      {
+        Content = "+  New job",
+        Height = 38,
+        MinWidth = 128,
+        Margin = new Thickness(12, 0, 0, 0)
+      };
+      ApplyStyle(newJobButton, "PrimaryButtonStyle");
+      newJobButton.Click += (_, _) => NewJobFromJobs(startNow: false);
+      toolbar.Children.Add(newJobButton);
+
+      return toolbar;
+    }
+
+    private Border CreateActiveTimerPanel()
+    {
+      Border panel = CreatePanelBorder();
+      WorkEntry? currentWorkEntry = timeTracker.CurrentWorkEntry;
+      StackPanel content = new();
+      content.Children.Add(CreateStatusTitle("Active timer", timeTracker.HasRunningWork ? SuccessBrush : SecondaryTextBrush));
+
+      if (currentWorkEntry == null)
+      {
+        jobsActiveTimerTextBlock = null;
+        content.Children.Add(new TextBlock
+        {
+          Text = "No active timer",
+          FontSize = 32,
+          FontWeight = FontWeights.SemiBold,
+          Foreground = PrimaryTextBrush,
+          Margin = new Thickness(0, 18, 0, 8)
+        });
+        content.Children.Add(new TextBlock
+        {
+          Text = "Start a quick project or create a new job to begin tracking.",
+          Foreground = SecondaryTextBrush,
+          TextWrapping = TextWrapping.Wrap
+        });
+        StackPanel emptyActions = new()
+        {
+          Orientation = Orientation.Horizontal,
+          Margin = new Thickness(0, 22, 0, 0)
+        };
+        Button newJobButton = CreatePanelActionButton("New job", true, (_, _) => NewJobFromJobs(startNow: false));
+        emptyActions.Children.Add(newJobButton);
+        content.Children.Add(emptyActions);
+        panel.Child = content;
+        return panel;
+      }
+
+      jobsActiveTimerTextBlock = new TextBlock
+      {
+        Text = FormatDurationClock(currentWorkEntry.Duration),
+        FontSize = 42,
+        FontWeight = FontWeights.SemiBold,
+        Foreground = PrimaryTextBrush,
+        Margin = new Thickness(0, 18, 0, 14)
+      };
+      content.Children.Add(jobsActiveTimerTextBlock);
+      content.Children.Add(new TextBlock
+      {
+        Text = currentWorkEntry.ClientName,
+        FontSize = 16,
+        FontWeight = FontWeights.SemiBold,
+        Foreground = PrimaryTextBrush
+      });
+      content.Children.Add(new TextBlock
+      {
+        Text = currentWorkEntry.ProjectName,
+        Foreground = PrimaryTextBrush,
+        Margin = new Thickness(0, 4, 0, 0)
+      });
+      content.Children.Add(new TextBlock
+      {
+        Text = currentWorkEntry.Description ?? string.Empty,
+        Foreground = SecondaryTextBrush,
+        Margin = new Thickness(0, 4, 0, 14),
+        TextTrimming = TextTrimming.CharacterEllipsis
+      });
+      content.Children.Add(CreateBillableLine(currentWorkEntry));
+
+      StackPanel actions = new()
+      {
+        Orientation = Orientation.Horizontal,
+        Margin = new Thickness(0, 20, 0, 0)
+      };
+      actions.Children.Add(CreatePanelActionButton("Stop", true, (_, _) =>
+      {
+        timeTracker.StopWork();
+        ShowHome();
+      }, "DangerButtonStyle"));
+      actions.Children.Add(CreatePanelActionButton("\uE769  Pause", false, (_, _) => { }, isEnabled: false));
+      content.Children.Add(actions);
+
+      panel.Child = content;
+      return panel;
+    }
+
+    private Border CreateQuickStartPanel()
+    {
+      Border panel = CreatePanelBorder();
+      StackPanel content = new();
+      content.Children.Add(CreateSectionTitle("Quick start", "Recent projects"));
+
+      List<Project> projects = timeTracker.Projects
+        .OrderByDescending(project => project.WorkEntries.Select(entry => entry.StartTime).DefaultIfEmpty(DateTime.MinValue).Max())
+        .Take(4)
+        .ToList();
+
+      if (projects.Count == 0)
+      {
+        content.Children.Add(CreateEmptyText("Create a project to enable quick start."));
+      }
+      else
+      {
+        foreach (Project project in projects)
+        {
+          content.Children.Add(CreateQuickStartRow(project));
+        }
+      }
+
+      panel.Child = content;
+      return panel;
+    }
+
+    private Border CreateRecentJobsPanel()
+    {
+      Border panel = CreatePanelBorder();
+      panel.Padding = new Thickness(0);
+      DockPanel content = new();
+      Border titleArea = new()
+      {
+        Padding = new Thickness(16, 14, 16, 10),
+        BorderBrush = PanelBorderBrush,
+        BorderThickness = new Thickness(0, 0, 0, 1),
+        Child = new TextBlock
+        {
+          Text = "Recent jobs",
+          FontSize = 17,
+          FontWeight = FontWeights.SemiBold,
+          Foreground = PrimaryTextBrush
+        }
+      };
+      DockPanel.SetDock(titleArea, Dock.Top);
+      content.Children.Add(titleArea);
+
+      StackPanel table = new();
+      table.Children.Add(CreateJobsTableHeader());
+
+      List<WorkEntry> jobs = timeTracker.WorkEntries
+        .OrderByDescending(workEntry => workEntry.IsRunning)
+        .ThenByDescending(workEntry => workEntry.StartTime)
+        .Take(8)
+        .ToList();
+
+      if (jobs.Count == 0)
+      {
+        table.Children.Add(CreateEmptyText("No jobs yet. Create a new job to start tracking."));
+      }
+      else
+      {
+        foreach (WorkEntry job in jobs)
+        {
+          table.Children.Add(CreateJobTableRow(job));
+        }
+      }
 
       ScrollViewer scrollViewer = new()
       {
-        Content = homeList
+        Content = table,
+        VerticalScrollBarVisibility = ScrollBarVisibility.Auto
+      };
+      content.Children.Add(scrollViewer);
+      panel.Child = content;
+      return panel;
+    }
+
+    private UIElement CreateQuickStartRow(Project project)
+    {
+      DockPanel row = new()
+      {
+        Margin = new Thickness(0, 16, 0, 0)
       };
 
-      ShowMainContent(scrollViewer);
+      Button startButton = CreatePanelActionButton("Start", false, (_, _) => StartProjectFromJobs(project));
+      DockPanel.SetDock(startButton, Dock.Right);
+      row.Children.Add(startButton);
+
+      Border colorChip = new()
+      {
+        Width = 14,
+        Height = 14,
+        Background = GetClientBrush(project.Client?.Name ?? project.Name ?? string.Empty),
+        CornerRadius = new CornerRadius(3),
+        Margin = new Thickness(0, 4, 14, 0),
+        VerticalAlignment = VerticalAlignment.Top
+      };
+      DockPanel.SetDock(colorChip, Dock.Left);
+      row.Children.Add(colorChip);
+
+      StackPanel text = new();
+      text.Children.Add(new TextBlock
+      {
+        Text = project.Name ?? string.Empty,
+        FontWeight = FontWeights.SemiBold,
+        Foreground = PrimaryTextBrush,
+        TextTrimming = TextTrimming.CharacterEllipsis
+      });
+      text.Children.Add(new TextBlock
+      {
+        Text = project.Client?.Name ?? string.Empty,
+        Foreground = SecondaryTextBrush,
+        Margin = new Thickness(0, 3, 0, 0),
+        TextTrimming = TextTrimming.CharacterEllipsis
+      });
+      row.Children.Add(text);
+      return row;
+    }
+
+    private static Grid CreateJobsTableHeader()
+    {
+      Grid header = CreateJobsTableGrid();
+      header.Background = BrushFromHex("#F8FAFC");
+      header.Children.Add(CreateJobsHeaderCell("Client", 0));
+      header.Children.Add(CreateJobsHeaderCell("Project", 1));
+      header.Children.Add(CreateJobsHeaderCell("Last entry", 2));
+      header.Children.Add(CreateJobsHeaderCell("Duration", 3));
+      header.Children.Add(CreateJobsHeaderCell("Rate", 4));
+      header.Children.Add(CreateJobsHeaderCell("Status", 5));
+      header.Children.Add(CreateJobsHeaderCell("Actions", 6));
+      return header;
+    }
+
+    private UIElement CreateJobTableRow(WorkEntry job)
+    {
+      Grid row = CreateJobsTableGrid();
+      row.MinHeight = 56;
+      row.Background = Brushes.White;
+
+      row.Children.Add(CreateClientCell(job));
+      row.Children.Add(CreateJobsTextCell(job.ProjectName, 1, true));
+      row.Children.Add(CreateJobsTextCell(job.StartTime.ToString("dd/MM/yyyy HH:mm", CultureInfo.CurrentCulture), 2, false));
+      row.Children.Add(CreateJobsTextCell(FormatDurationShort(job.Duration), 3, true));
+      row.Children.Add(CreateJobsTextCell($"{job.Currency}{job.HourlyRate:0.##}/hr", 4, false));
+      row.Children.Add(CreateStatusBadge(job.IsRunning ? "Running" : job.Duration > TimeSpan.Zero ? "Ready" : "Draft", 5, job.IsRunning));
+      row.Children.Add(CreateJobActionsCell(job));
+      row.Children.Add(new Border
+      {
+        Height = 1,
+        Background = BrushFromHex("#E7ECF1"),
+        VerticalAlignment = VerticalAlignment.Bottom
+      });
+      Grid.SetColumnSpan(row.Children[^1], 7);
+      return row;
+    }
+
+    private static Grid CreateJobsTableGrid()
+    {
+      Grid grid = new();
+      grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.3, GridUnitType.Star) });
+      grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.45, GridUnitType.Star) });
+      grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.25, GridUnitType.Star) });
+      grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.85, GridUnitType.Star) });
+      grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.8, GridUnitType.Star) });
+      grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.9, GridUnitType.Star) });
+      grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.05, GridUnitType.Star) });
+      return grid;
+    }
+
+    private static TextBlock CreateJobsHeaderCell(string text, int column)
+    {
+      TextBlock cell = new()
+      {
+        Text = text,
+        Foreground = PrimaryTextBrush,
+        FontWeight = FontWeights.SemiBold,
+        Padding = new Thickness(16, 12, 8, 12)
+      };
+      Grid.SetColumn(cell, column);
+      return cell;
+    }
+
+    private UIElement CreateClientCell(WorkEntry job)
+    {
+      DockPanel cell = new()
+      {
+        Margin = new Thickness(16, 10, 8, 10)
+      };
+      Border avatar = new()
+      {
+        Width = 26,
+        Height = 26,
+        Background = GetClientBrush(job.ClientName),
+        CornerRadius = new CornerRadius(4),
+        Margin = new Thickness(0, 0, 10, 0),
+        Child = new TextBlock
+        {
+          Text = GetInitial(job.ClientName),
+          Foreground = Brushes.White,
+          FontWeight = FontWeights.SemiBold,
+          HorizontalAlignment = HorizontalAlignment.Center,
+          VerticalAlignment = VerticalAlignment.Center
+        }
+      };
+      DockPanel.SetDock(avatar, Dock.Left);
+      cell.Children.Add(avatar);
+      cell.Children.Add(new TextBlock
+      {
+        Text = job.ClientName,
+        Foreground = PrimaryTextBrush,
+        FontWeight = FontWeights.SemiBold,
+        VerticalAlignment = VerticalAlignment.Center,
+        TextTrimming = TextTrimming.CharacterEllipsis
+      });
+      return cell;
+    }
+
+    private static TextBlock CreateJobsTextCell(string text, int column, bool isStrong)
+    {
+      TextBlock cell = new()
+      {
+        Text = text,
+        Foreground = isStrong ? PrimaryTextBrush : SecondaryTextBrush,
+        FontWeight = isStrong ? FontWeights.SemiBold : FontWeights.Normal,
+        Padding = new Thickness(16, 0, 8, 0),
+        VerticalAlignment = VerticalAlignment.Center,
+        TextTrimming = TextTrimming.CharacterEllipsis
+      };
+      Grid.SetColumn(cell, column);
+      return cell;
+    }
+
+    private static Border CreateStatusBadge(string text, int column, bool isRunning)
+    {
+      Brush statusBrush = isRunning ? SuccessBrush : text == "Ready" ? AccentBrush : SecondaryTextBrush;
+      Border badge = new()
+      {
+        Background = WithOpacity(statusBrush, 0.12),
+        BorderBrush = WithOpacity(statusBrush, 0.45),
+        BorderThickness = new Thickness(1),
+        CornerRadius = new CornerRadius(5),
+        Padding = new Thickness(10, 3, 10, 4),
+        HorizontalAlignment = HorizontalAlignment.Left,
+        VerticalAlignment = VerticalAlignment.Center,
+        Margin = new Thickness(16, 0, 8, 0),
+        Child = new TextBlock
+        {
+          Text = text,
+          Foreground = statusBrush,
+          FontWeight = FontWeights.SemiBold,
+          FontSize = 12
+        }
+      };
+      Grid.SetColumn(badge, column);
+      return badge;
+    }
+
+    private UIElement CreateJobActionsCell(WorkEntry job)
+    {
+      StackPanel actions = new()
+      {
+        Orientation = Orientation.Horizontal,
+        HorizontalAlignment = HorizontalAlignment.Left,
+        VerticalAlignment = VerticalAlignment.Center,
+        Margin = new Thickness(12, 0, 0, 0)
+      };
+      actions.Children.Add(CreateSmallActionButton("\uE768", (_, _) =>
+      {
+        timeTracker.StartNewWorkEntryBasedOn(job);
+        ShowHome();
+      }));
+      actions.Children.Add(CreateSmallActionButton("\uE70F", (_, _) =>
+      {
+        EditWorkEntry(job);
+        ShowHome();
+      }));
+      Grid.SetColumn(actions, 6);
+      return actions;
+    }
+
+    private Button CreateJobsIconButton(string icon, RoutedEventHandler handler)
+    {
+      Button button = new()
+      {
+        Content = icon,
+        Margin = new Thickness(0, 0, 8, 0)
+      };
+      ApplyStyle(button, "IconButtonStyle");
+      button.Click += handler;
+      return button;
+    }
+
+    private static Button CreateSmallActionButton(string icon, RoutedEventHandler handler)
+    {
+      Button button = new()
+      {
+        Content = icon,
+        Margin = new Thickness(0, 0, 4, 0),
+      };
+      ApplyStyle(button, "FlatIconButtonStyle");
+      button.Click += handler;
+      return button;
+    }
+
+    private Button CreatePanelActionButton(string text, bool isPrimary, RoutedEventHandler handler, string? styleKey = null, bool isEnabled = true)
+    {
+      Button button = new()
+      {
+        Content = text,
+        Height = 34,
+        MinWidth = 86,
+        Margin = new Thickness(0, 0, 10, 0),
+        IsEnabled = isEnabled
+      };
+      ApplyStyle(button, styleKey ?? (isPrimary ? "PrimaryButtonStyle" : "SecondaryButtonStyle"));
+      button.Click += handler;
+      return button;
+    }
+
+    private static TextBlock CreateStatusTitle(string title, Brush dotBrush)
+    {
+      TextBlock text = new()
+      {
+        FontSize = 17,
+        FontWeight = FontWeights.SemiBold,
+        Foreground = PrimaryTextBrush
+      };
+      text.Inlines.Add(new Run("\u25CF")
+      {
+        Foreground = dotBrush,
+        FontSize = 14
+      });
+      text.Inlines.Add(new Run($"  {title}"));
+      return text;
+    }
+
+    private static UIElement CreateBillableLine(WorkEntry workEntry)
+    {
+      StackPanel line = new()
+      {
+        Orientation = Orientation.Horizontal,
+        Margin = new Thickness(0, 2, 0, 0)
+      };
+      line.Children.Add(new Border
+      {
+        Width = 16,
+        Height = 16,
+        Background = SuccessBrush,
+        CornerRadius = new CornerRadius(3),
+        Margin = new Thickness(0, 0, 8, 0),
+        Child = new TextBlock
+        {
+          Text = "\uE73E",
+          FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),
+          FontSize = 10,
+          Foreground = Brushes.White,
+          HorizontalAlignment = HorizontalAlignment.Center,
+          VerticalAlignment = VerticalAlignment.Center
+        }
+      });
+      line.Children.Add(new TextBlock
+      {
+        Text = $"Billable  {workEntry.Currency}{workEntry.HourlyRate:0.##}/hr",
+        Foreground = PrimaryTextBrush,
+        VerticalAlignment = VerticalAlignment.Center
+      });
+      return line;
+    }
+
+    private void NewJobFromJobs(bool startNow)
+    {
+      NewWorkEntryDialog dialog = new()
+      {
+        Owner = this,
+        WindowStartupLocation = WindowStartupLocation.CenterOwner
+      };
+
+      if (dialog.ShowDialog() == true)
+      {
+        WorkEntry workEntry = timeTracker.CreateWorkEntry(
+          dialog.ClientName,
+          dialog.ProjectName,
+          dialog.StartTime,
+          dialog.Description,
+          dialog.HourlyRate,
+          dialog.Currency,
+          dialog.Duration);
+
+        if (startNow || dialog.StartTimerNow)
+        {
+          timeTracker.StartWork(workEntry);
+        }
+
+        ShowHome();
+      }
+    }
+
+    private void StartProjectFromJobs(Project project)
+    {
+      WorkEntry workEntry = timeTracker.CreateWorkEntry(
+        project,
+        DateTime.Now,
+        project.Description,
+        Convert.ToDecimal(project.Rate > 0 ? project.Rate : project.Client?.DefaultHourlyRate ?? TTAppSettings.Instance.DefaultHourlyRate),
+        string.IsNullOrWhiteSpace(project.Client?.DefaultCurrency) ? TTAppSettings.Instance.DefaultCurrency : project.Client.DefaultCurrency);
+      timeTracker.StartWork(workEntry);
+      ShowHome();
+    }
+
+    private static string FormatDurationClock(TimeSpan duration)
+    {
+      return duration.TotalHours >= 100
+        ? $"{(int)duration.TotalHours:000}:{duration.Minutes:00}:{duration.Seconds:00}"
+        : $"{(int)duration.TotalHours:00}:{duration.Minutes:00}:{duration.Seconds:00}";
+    }
+
+    private static string FormatDurationShort(TimeSpan duration)
+    {
+      return duration.TotalHours >= 1
+        ? $"{duration.TotalHours:0.#}h"
+        : $"{duration.TotalMinutes:0}m";
+    }
+
+    private static string GetInitial(string value)
+    {
+      return string.IsNullOrWhiteSpace(value) ? "?" : value.Trim()[0].ToString().ToUpperInvariant();
     }
 
     private void ShowClients()
     {
       HeaderLabel.Content = "Clients";
+      HeaderSubLabel.Visibility = Visibility.Visible;
+      HeaderSubLabel.Text = $"{timeTracker.ActiveClients.Count} active clients";
+      StartStopButton.Visibility = Visibility.Visible;
+      HeaderCenterContent.Content = null;
       SaveCurrentPage(ClientsPage);
 
       DataGrid grid = CreateReadOnlyGrid();
@@ -308,6 +1790,10 @@ namespace TimeTracker
     private void ShowProjects()
     {
       HeaderLabel.Content = "Projects";
+      HeaderSubLabel.Visibility = Visibility.Visible;
+      HeaderSubLabel.Text = $"{timeTracker.Projects.Count} active projects";
+      StartStopButton.Visibility = Visibility.Visible;
+      HeaderCenterContent.Content = null;
       SaveCurrentPage(ProjectsPage);
 
       DataGrid grid = CreateReadOnlyGrid();
@@ -352,6 +1838,10 @@ namespace TimeTracker
     private void ShowTimesheets()
     {
       HeaderLabel.Content = "Time sheets";
+      HeaderSubLabel.Visibility = Visibility.Visible;
+      HeaderSubLabel.Text = $"{timeTracker.WorkEntries.Count} active entries";
+      StartStopButton.Visibility = Visibility.Visible;
+      HeaderCenterContent.Content = null;
       SaveCurrentPage(TimesheetsPage);
 
       CollectionViewSource timesheets = new()
@@ -449,6 +1939,10 @@ namespace TimeTracker
     private void ShowReports()
     {
       HeaderLabel.Content = "Reports";
+      HeaderSubLabel.Visibility = Visibility.Visible;
+      HeaderSubLabel.Text = $"{timeTracker.Reports.Count} saved reports";
+      StartStopButton.Visibility = Visibility.Visible;
+      HeaderCenterContent.Content = null;
       SaveCurrentPage(ReportsPage);
 
       DataGrid grid = CreateReadOnlyGrid();
@@ -515,6 +2009,10 @@ namespace TimeTracker
     private void ShowInvoices()
     {
       HeaderLabel.Content = "Invoices";
+      HeaderSubLabel.Visibility = Visibility.Visible;
+      HeaderSubLabel.Text = $"{timeTracker.Invoices.Count} saved invoices";
+      StartStopButton.Visibility = Visibility.Visible;
+      HeaderCenterContent.Content = null;
       SaveCurrentPage(InvoicesPage);
 
       DataGrid grid = CreateReadOnlyGrid();
@@ -1291,6 +2789,8 @@ namespace TimeTracker
       };
       Button cancelButton = new() { Content = "Cancel", Width = 80, Height = 28, Margin = new Thickness(0, 0, 8, 0), IsCancel = true };
       Button createButton = new() { Content = "Create", Width = 80, Height = 28, IsDefault = true };
+      ApplyStyle(cancelButton, "SecondaryButtonStyle");
+      ApplyStyle(createButton, "PrimaryButtonStyle");
       createButton.Click += (_, _) => dialog.DialogResult = true;
       buttons.Children.Add(cancelButton);
       buttons.Children.Add(createButton);
@@ -1409,6 +2909,10 @@ namespace TimeTracker
     private void ShowArchive()
     {
       HeaderLabel.Content = "Archive";
+      HeaderSubLabel.Visibility = Visibility.Visible;
+      HeaderSubLabel.Text = $"{timeTracker.ArchivedItems.Count} archived items";
+      StartStopButton.Visibility = Visibility.Visible;
+      HeaderCenterContent.Content = null;
       SaveCurrentPage(ArchivePage);
 
       DataGrid grid = CreateReadOnlyGrid();
@@ -1547,7 +3051,7 @@ namespace TimeTracker
 
       if (dialog.ShowDialog() == true)
       {
-        timeTracker.CreateWorkEntry(
+        WorkEntry workEntry = timeTracker.CreateWorkEntry(
           dialog.ClientName,
           dialog.ProjectName,
           dialog.StartTime,
@@ -1555,6 +3059,10 @@ namespace TimeTracker
           dialog.HourlyRate,
           dialog.Currency,
           dialog.Duration);
+        if (dialog.StartTimerNow)
+        {
+          timeTracker.StartWork(workEntry);
+        }
         ShowTimesheets();
       }
     }
@@ -1584,6 +3092,10 @@ namespace TimeTracker
     private void ShowSettings()
     {
       HeaderLabel.Content = "Settings";
+      HeaderSubLabel.Visibility = Visibility.Visible;
+      HeaderSubLabel.Text = "Defaults, templates, and timer behavior";
+      StartStopButton.Visibility = Visibility.Visible;
+      HeaderCenterContent.Content = null;
       SaveCurrentPage(SettingsPage);
 
       TTAppSettings settings = TTAppSettings.Instance;
@@ -1814,15 +3326,16 @@ namespace TimeTracker
 
     private static DataGrid CreateReadOnlyGrid()
     {
-      return new DataGrid
+      DataGrid grid = new()
       {
         AutoGenerateColumns = false,
         CanUserAddRows = false,
         IsReadOnly = true,
-        GridLinesVisibility = DataGridGridLinesVisibility.Horizontal,
-        HeadersVisibility = DataGridHeadersVisibility.Column,
-        Margin = new Thickness(10)
+        AlternationCount = 2,
+        Margin = new Thickness(0)
       };
+      ApplyStyle(grid, "DenseDataGridStyle");
+      return grid;
     }
 
     private static List<T> GetSelectedItems<T>(DataGrid grid)
@@ -1858,21 +3371,29 @@ namespace TimeTracker
 
     private static DockPanel CreateListPage(IEnumerable<Button> buttons, UIElement content)
     {
-      DockPanel page = new();
+      DockPanel page = new()
+      {
+        LastChildFill = true
+      };
 
       StackPanel toolbar = new()
       {
         Orientation = Orientation.Horizontal,
-        Margin = new Thickness(10, 10, 10, 0)
+        Margin = new Thickness(0, 0, 0, 14),
+        HorizontalAlignment = HorizontalAlignment.Right
       };
       foreach (Button button in buttons)
       {
         toolbar.Children.Add(button);
       }
 
+      Border contentPanel = CreatePanelBorder();
+      contentPanel.Padding = new Thickness(0);
+      contentPanel.Child = content;
+
       DockPanel.SetDock(toolbar, Dock.Top);
       page.Children.Add(toolbar);
-      page.Children.Add(content);
+      page.Children.Add(contentPanel);
 
       return page;
     }
@@ -1883,12 +3404,60 @@ namespace TimeTracker
       {
         Content = text,
         MinWidth = 90,
-        Height = 28,
+        Height = 32,
         Margin = new Thickness(0, 0, 8, 0)
       };
+      ApplyStyle(button, text.StartsWith("New", StringComparison.OrdinalIgnoreCase) ? "PrimaryButtonStyle" : "ToolbarButtonStyle");
       button.Click += handler;
 
       return button;
+    }
+
+    private static void ApplyStyle(FrameworkElement element, string resourceKey)
+    {
+      object? resource = Application.Current.MainWindow?.TryFindResource(resourceKey)
+        ?? Application.Current.TryFindResource(resourceKey);
+
+      if (resource is Style style)
+      {
+        element.Style = style;
+      }
+    }
+
+    private static SolidColorBrush BrushFromHex(string hex)
+    {
+      return new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex));
+    }
+
+    private static SolidColorBrush WithOpacity(Brush brush, double opacity)
+    {
+      Color color = brush is SolidColorBrush solidColorBrush ? solidColorBrush.Color : Colors.Transparent;
+      return new SolidColorBrush(Color.FromArgb((byte)(255 * opacity), color.R, color.G, color.B));
+    }
+
+    private static Brush GetClientBrush(string clientName)
+    {
+      string[] palette =
+      {
+        "#0090EE",
+        "#1F9D61",
+        "#D98B16",
+        "#5E6AD2",
+        "#D14343",
+        "#0EA5A3",
+        "#8E5CF7",
+        "#C47F00",
+        "#2F80ED",
+        "#7A9A01"
+      };
+
+      int hash = 17;
+      foreach (char character in clientName)
+      {
+        hash = (hash * 31) + character;
+      }
+
+      return BrushFromHex(palette[Math.Abs(hash) % palette.Length]);
     }
 
     private static ArchiveRow CreateArchiveRow(TTDataObject item)
@@ -2058,6 +3627,8 @@ namespace TimeTracker
       };
       Button cancelButton = new() { Content = "Cancel", Width = 80, Height = 28, Margin = new Thickness(0, 0, 8, 0), IsCancel = true };
       Button saveButton = new() { Content = "Save", Width = 80, Height = 28, IsDefault = true };
+      ApplyStyle(cancelButton, "SecondaryButtonStyle");
+      ApplyStyle(saveButton, "PrimaryButtonStyle");
       saveButton.Click += (_, _) => dialog.DialogResult = true;
       buttons.Children.Add(cancelButton);
       buttons.Children.Add(saveButton);
@@ -2485,5 +4056,19 @@ namespace TimeTracker
 
       SaveWindowState();
     }
+  }
+
+  public enum DashboardPeriodMode
+  {
+    Week,
+    Month
+  }
+
+  public enum DashboardMetricIcon
+  {
+    Hours,
+    Earnings,
+    BillableEntries,
+    AvgDay
   }
 }

@@ -33,7 +33,9 @@ namespace TimeTracker.Dialogs
     {
       _isEditingExistingEntry = true;
       Title = "Edit Work Entry";
-      StartButton.Content = "Save";
+      DialogTitleTextBlock.Text = "Edit work entry";
+      SaveEntryButton.Content = "Save entry";
+      StartButton.Content = "Save and start";
 
       ClientComboBox.Text = workEntry.Project?.Client?.Name ?? string.Empty;
       ProjectComboBox.Text = workEntry.Project?.Name ?? string.Empty;
@@ -57,6 +59,7 @@ namespace TimeTracker.Dialogs
     public string Currency { get; private set; } = string.Empty;
     public DateTime StartTime { get; private set; }
     public TimeSpan? Duration { get; private set; }
+    public bool StartTimerNow { get; private set; }
 
     private void LoadCombos()
     {
@@ -111,6 +114,8 @@ namespace TimeTracker.Dialogs
 
     private void StartButton_Click(object sender, RoutedEventArgs e)
     {
+      StartTimerNow = sender == StartButton;
+
       // is the client name or project name empty?
       if (string.IsNullOrWhiteSpace(ClientComboBox.Text))
       {
@@ -171,6 +176,14 @@ namespace TimeTracker.Dialogs
         Duration = null;
       }
 
+      if (!StartTimerNow && (Duration == null || Duration.Value.TotalMinutes < 1))
+      {
+        DurationHoursTextBox.BorderBrush = Brushes.Red;
+        DurationMinutesTextBox.BorderBrush = Brushes.Red;
+        MessageBox.Show("Please enter at least one minute of work before saving an entry.");
+        return;
+      }
+
       if (string.IsNullOrWhiteSpace(CurrencyComboBox.Text))
       {
         CurrencyComboBox.BorderBrush = Brushes.Red;
@@ -180,9 +193,19 @@ namespace TimeTracker.Dialogs
 
       HourlyRate = hourlyRate;
       Currency = TTAppSettings.NormalizeCurrency(CurrencyComboBox.Text);
-      StartTime = StartTimePicker.SelectedDate;
+      StartTime = StartTimerNow ? DateTime.Now : StartTimePicker.SelectedDate;
+      if (StartTimerNow)
+      {
+        Duration = null;
+      }
 
       DialogResult = true;
+      Close();
+    }
+
+    private void CloseButton_Click(object sender, RoutedEventArgs e)
+    {
+      DialogResult = false;
       Close();
     }
 

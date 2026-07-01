@@ -366,3 +366,6 @@ FodyWeavers.xsd
 Templates/*.docx
 !Templates/InvoiceTemplateExample.docx
 !Templates/ReportTemplateExample.docx
+
+# Local design mockups
+mockups/

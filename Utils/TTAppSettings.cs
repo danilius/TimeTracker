@@ -85,11 +85,18 @@ namespace TimeTracker.Utils
       set { _defaultCurrency = value; }
     }
 
-    private string _currentPage = "Jobs";
+    private string _currentPage = "Dashboard";
     public string CurrentPage
     {
       get { return _currentPage; }
       set { _currentPage = value; }
+    }
+
+    private DayOfWeek _weekStartsOn = DayOfWeek.Monday;
+    public DayOfWeek WeekStartsOn
+    {
+      get { return _weekStartsOn; }
+      set { _weekStartsOn = value; }
     }
 
     private bool _isNavCollapsed;

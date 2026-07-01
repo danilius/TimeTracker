@@ -1447,7 +1447,7 @@ namespace TimeTracker
 
       row.Children.Add(CreateClientCell(job));
       row.Children.Add(CreateJobsTextCell(job.ProjectName, 1, true));
-      row.Children.Add(CreateJobsTextCell(job.StartTime.ToString("dd/MM/yyyy HH:mm", CultureInfo.CurrentCulture), 2, false));
+      row.Children.Add(CreateJobsTextCell(job.StartTime.ToString("dd/MM/yyyy " + TTAppSettings.Instance.ShortTimePattern, CultureInfo.CurrentCulture), 2, false));
       row.Children.Add(CreateJobsTextCell(FormatDurationShort(job.Duration), 3, true));
       row.Children.Add(CreateJobsTextCell($"{job.Currency}{job.HourlyRate:0.##}/hr", 4, false));
       row.Children.Add(CreateStatusBadge(job.IsRunning ? "Running" : job.Duration > TimeSpan.Zero ? "Ready" : "Draft", 5, job.IsRunning));
@@ -1732,9 +1732,8 @@ namespace TimeTracker
 
     private static string FormatDurationShort(TimeSpan duration)
     {
-      return duration.TotalHours >= 1
-        ? $"{duration.TotalHours:0.#}h"
-        : $"{duration.TotalMinutes:0}m";
+      int hours = (int)duration.TotalHours;
+      return $"{hours}:{duration.Minutes:00}";
     }
 
     private static string GetInitial(string value)
@@ -2540,7 +2539,7 @@ namespace TimeTracker
 
     private static string FormatDateTime(DateTime dateTime)
     {
-      return dateTime.ToString("g");
+      return dateTime.ToString("dd/MM/yyyy " + TTAppSettings.Instance.ShortTimePattern, CultureInfo.CurrentCulture);
     }
 
     private static string SanitizeFileName(string fileName)
@@ -3247,6 +3246,31 @@ namespace TimeTracker
       panel.Children.Add(CreateSettingsLabel("Repeat reminder minutes"));
       panel.Children.Add(reminderTextBox);
 
+      panel.Children.Add(new TextBlock
+      {
+        Text = "Display",
+        FontSize = 22,
+        FontWeight = FontWeights.SemiBold,
+        Margin = new Thickness(0, 10, 0, 15)
+      });
+
+      ComboBox timeFormatComboBox = new()
+      {
+        ItemsSource = TimeDisplayFormatOption.All,
+        SelectedItem = TimeDisplayFormatOption.All.First(option => option.Value == settings.TimeDisplayFormat),
+        DisplayMemberPath = nameof(TimeDisplayFormatOption.DisplayName),
+        Margin = new Thickness(0, 0, 0, 12),
+        Width = 260,
+        HorizontalAlignment = HorizontalAlignment.Left
+      };
+      panel.Children.Add(CreateSettingsLabel("Time format"));
+      panel.Children.Add(timeFormatComboBox);
+      timeFormatComboBox.SelectionChanged += (_, _) =>
+      {
+        settings.TimeDisplayFormat = ((TimeDisplayFormatOption)timeFormatComboBox.SelectedItem).Value;
+        settings.Save();
+      };
+
       RoutedEventHandler saveOnLostFocus = (_, _) => SaveSettingsIfValid(defaultHourlyRateTextBox, defaultCurrencyComboBox, wordTemplatePathTextBox, reportTemplatePathTextBox, thresholdTextBox, behaviorComboBox, reminderTextBox, true);
       defaultHourlyRateTextBox.LostFocus += saveOnLostFocus;
       defaultCurrencyComboBox.LostFocus += saveOnLostFocus;
@@ -3928,6 +3952,24 @@ namespace TimeTracker
         new LongRunningJobBehaviorOption(LongRunningJobBehavior.PromptAndContinue, "Prompt and continue"),
         new LongRunningJobBehaviorOption(LongRunningJobBehavior.PromptAndStop, "Prompt and stop"),
         new LongRunningJobBehaviorOption(LongRunningJobBehavior.RepeatReminder, "Repeat reminder")
+      };
+    }
+
+    private sealed class TimeDisplayFormatOption
+    {
+      public TimeDisplayFormatOption(TimeDisplayFormat value, string displayName)
+      {
+        Value = value;
+        DisplayName = displayName;
+      }
+
+      public TimeDisplayFormat Value { get; }
+      public string DisplayName { get; }
+
+      public static IReadOnlyList<TimeDisplayFormatOption> All { get; } = new[]
+      {
+        new TimeDisplayFormatOption(TimeDisplayFormat.TwentyFourHour, "24-hour (14:30)"),
+        new TimeDisplayFormatOption(TimeDisplayFormat.TwelveHour, "12-hour (2:30 PM)")
       };
     }
 

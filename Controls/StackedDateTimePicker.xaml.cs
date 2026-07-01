@@ -2,6 +2,7 @@
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
+using TimeTracker.Utils;
 
 namespace TimeTracker.Controls
 {
@@ -31,7 +32,8 @@ namespace TimeTracker.Controls
 
       for (int minutes = 0; minutes < 24 * 60; minutes += 15)
       {
-        TimeComboBox.Items.Add(new TimeSpan(0, minutes, 0).ToString(@"hh\:mm"));
+        DateTime slot = DateTime.Today.AddMinutes(minutes);
+        TimeComboBox.Items.Add(slot.ToString(TTAppSettings.Instance.ShortTimePattern, CultureInfo.CurrentCulture));
       }
 
       SyncControlsFromValue(SelectedDate);
@@ -46,7 +48,7 @@ namespace TimeTracker.Controls
     {
       _isSyncing = true;
       DatePickerControl.SelectedDate = value.Date;
-      TimeComboBox.Text = value.ToString("HH:mm");
+      TimeComboBox.Text = value.ToString(TTAppSettings.Instance.ShortTimePattern, CultureInfo.CurrentCulture);
       _isSyncing = false;
     }
 

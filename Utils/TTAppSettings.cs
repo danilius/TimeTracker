@@ -13,6 +13,12 @@ namespace TimeTracker.Utils
     RepeatReminder
   }
 
+  public enum TimeDisplayFormat
+  {
+    TwentyFourHour,
+    TwelveHour
+  }
+
   public class TTAppSettings
   {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -97,6 +103,23 @@ namespace TimeTracker.Utils
     {
       get { return _weekStartsOn; }
       set { _weekStartsOn = value; }
+    }
+
+    private TimeDisplayFormat _timeDisplayFormat = TimeDisplayFormat.TwentyFourHour;
+    public TimeDisplayFormat TimeDisplayFormat
+    {
+      get { return _timeDisplayFormat; }
+      set { _timeDisplayFormat = value; }
+    }
+
+    /// <summary>
+    /// The .NET custom format string for rendering a time of day, based on
+    /// <see cref="TimeDisplayFormat" /> (24-hour "HH:mm" or 12-hour "h:mm tt").
+    /// </summary>
+    [JsonIgnore]
+    public string ShortTimePattern
+    {
+      get { return _timeDisplayFormat == TimeDisplayFormat.TwelveHour ? "h:mm tt" : "HH:mm"; }
     }
 
     private bool _isNavCollapsed;

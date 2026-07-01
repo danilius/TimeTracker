@@ -157,6 +157,13 @@ namespace TimeTracker.Utils
       set { _windowHeight = value; }
     }
 
+    private bool _isWindowMaximized = false;
+    public bool IsWindowMaximized
+    {
+      get { return _isWindowMaximized; }
+      set { _isWindowMaximized = value; }
+    }
+
     public static string NormalizeCurrency(string currency)
     {
       string trimmedCurrency = currency.Trim();

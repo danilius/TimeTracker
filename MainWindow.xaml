@@ -12,7 +12,9 @@
   MinHeight="520"
   Background="#F3F5F7"
   Closing="Window_Closing"
+  ContentRendered="Window_ContentRendered"
   FontFamily="Segoe UI"
+  StateChanged="Window_StateChanged"
   mc:Ignorable="d">
 
   <Window.Resources>

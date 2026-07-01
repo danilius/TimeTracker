@@ -5,6 +5,7 @@ using System.Globalization;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Windows;
@@ -13,6 +14,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Data;
 using System.Windows.Documents;
 using System.Windows.Media;
+using System.Windows.Threading;
 using TimeTracker.Dialogs;
 using TimeTracker.Models;
 using TimeTracker.Utils;
@@ -35,9 +37,14 @@ namespace TimeTracker
     private const string InvoicesPage = "Invoices";
     private const string ArchivePage = "Archive";
     private const string SettingsPage = "Settings";
+    private const double GridColumnBreathingSpace = 100;
+    private const double GridColumnMinimumWidth = 80;
     private DashboardPeriodMode dashboardPeriodMode = DashboardPeriodMode.Week;
     private DateTime dashboardAnchorDate = DateTime.Today;
     private Popup? dashboardDatePopup;
+    private readonly HashSet<string> autoSizedPages = new();
+    private bool shouldRestoreMaximizedWindow;
+    private bool isRestoringWindowState;
     private readonly System.Windows.Threading.DispatcherTimer jobsPageTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     private TextBlock? jobsActiveTimerTextBlock;
     private static readonly Brush AccentBrush = BrushFromHex("#0090EE");
@@ -53,6 +60,7 @@ namespace TimeTracker
 
       timeTracker.RunningWorkChanged += TimeTracker_RunningWorkChanged;
       jobsPageTimer.Tick += JobsPageTimer_Tick;
+      SourceInitialized += MainWindow_SourceInitialized;
 
       RestoreWindowState();
       RestoreNavigationState();
@@ -273,11 +281,37 @@ namespace TimeTracker
         Top = settings.WindowTop;
         WindowStartupLocation = WindowStartupLocation.Manual;
       }
+
+      shouldRestoreMaximizedWindow = settings.IsWindowMaximized;
+    }
+
+    private void MainWindow_SourceInitialized(object? sender, EventArgs e)
+    {
+      RestoreMaximizedWindowState();
+    }
+
+    private void Window_ContentRendered(object? sender, EventArgs e)
+    {
+      RestoreMaximizedWindowState();
+    }
+
+    private void RestoreMaximizedWindowState()
+    {
+      if (!shouldRestoreMaximizedWindow || WindowState == WindowState.Maximized)
+      {
+        return;
+      }
+
+      isRestoringWindowState = true;
+      WindowState = WindowState.Maximized;
+      isRestoringWindowState = false;
     }
 
     private void SaveWindowState()
     {
       TTAppSettings settings = TTAppSettings.Instance;
+
+      settings.IsWindowMaximized = WindowState == WindowState.Maximized;
 
       if (WindowState == WindowState.Normal)
       {
@@ -286,9 +320,24 @@ namespace TimeTracker
         settings.WindowWidth = Width;
         settings.WindowHeight = Height;
       }
+      else if (WindowState == WindowState.Maximized)
+      {
+        settings.WindowLeft = RestoreBounds.Left;
+        settings.WindowTop = RestoreBounds.Top;
+        settings.WindowWidth = RestoreBounds.Width;
+        settings.WindowHeight = RestoreBounds.Height;
+      }
 
       settings.IsNavCollapsed = isNavCollapsed;
       settings.Save();
+    }
+
+    private void Window_StateChanged(object sender, EventArgs e)
+    {
+      if (!isRestoringWindowState)
+      {
+        SaveWindowState();
+      }
     }
 
     private void SaveCurrentPage(string page)
@@ -1769,6 +1818,7 @@ namespace TimeTracker
       grid.Columns.Add(new DataGridTextColumn { Header = "Invoice prefix", Binding = new Binding("InvoiceNumberPrefix") });
       grid.Columns.Add(new DataGridTextColumn { Header = "Current invoice number", Binding = new Binding("CurrentInvoiceNumber") });
       grid.Columns.Add(new DataGridTextColumn { Header = "Projects", Binding = new Binding("Projects.Count") });
+      AutoSizeGridColumnsOnFirstPageOpen(ClientsPage, grid);
 
       ShowMainContent(CreateListPage(
         CreateToolbarButton("New Client", (_, _) => NewClient()),
@@ -1817,6 +1867,7 @@ namespace TimeTracker
       grid.Columns.Add(new DataGridTextColumn { Header = "Client", Binding = new Binding("Client.Name") });
       grid.Columns.Add(new DataGridTextColumn { Header = "Description", Binding = new Binding("Description") });
       grid.Columns.Add(new DataGridTextColumn { Header = "Rate", Binding = new Binding("Rate") });
+      AutoSizeGridColumnsOnFirstPageOpen(ProjectsPage, grid);
 
       ShowMainContent(CreateListPage(
         CreateToolbarButton("New Project", (_, _) => NewProject()),
@@ -1917,6 +1968,7 @@ namespace TimeTracker
         Binding = new Binding("Duration") { StringFormat = @"hh\:mm" },
         IsReadOnly = true
       });
+      AutoSizeGridColumnsOnFirstPageOpen(TimesheetsPage, grid);
 
       ShowMainContent(CreateListPage(
         CreateToolbarButton("New Entry", (_, _) => NewManualWorkEntry()),
@@ -1972,6 +2024,7 @@ namespace TimeTracker
       grid.Columns.Add(new DataGridTextColumn { Header = "Hours", Binding = new Binding(nameof(ReportRow.Hours)) { StringFormat = "0.##" } });
       grid.Columns.Add(new DataGridTextColumn { Header = "Total", Binding = new Binding(nameof(ReportRow.Total)) { StringFormat = "0.00" } });
       grid.Columns.Add(new DataGridTextColumn { Header = "Currency", Binding = new Binding(nameof(ReportRow.Currency)) });
+      AutoSizeGridColumnsOnFirstPageOpen(ReportsPage, grid);
 
       ShowMainContent(CreateListPage(new[]
       {
@@ -2042,10 +2095,11 @@ namespace TimeTracker
       grid.Columns.Add(new DataGridTextColumn { Header = "Hours", Binding = new Binding(nameof(InvoiceRow.HoursTotal)) { StringFormat = "0.##" } });
       grid.Columns.Add(new DataGridTextColumn { Header = "Total", Binding = new Binding(nameof(InvoiceRow.Total)) { StringFormat = "0.00" } });
       grid.Columns.Add(new DataGridTextColumn { Header = "Currency", Binding = new Binding(nameof(InvoiceRow.Currency)) });
+      AutoSizeGridColumnsOnFirstPageOpen(InvoicesPage, grid);
 
       DockPanel page = CreateListPage(new[]
       {
-        CreateToolbarButton("New Invoice", (_, _) => NewInvoice()),
+        CreateToolbarButton("New", (_, _) => NewInvoice()),
         CreateToolbarButton("Print", (_, _) =>
         {
           if (grid.SelectedItem is InvoiceRow row)
@@ -2053,7 +2107,7 @@ namespace TimeTracker
             PrintInvoice(row.Invoice);
           }
         }),
-        CreateToolbarButton("Export Word", (_, _) =>
+        CreateToolbarButton("Word", (_, _) =>
         {
           if (grid.SelectedItem is InvoiceRow row)
           {
@@ -2660,7 +2714,7 @@ namespace TimeTracker
       };
 
       bool accepted = ShowSimpleForm(
-        report == null ? "New Report" : "Edit Report",
+        report == null ? "New report" : "Edit report",
         new[]
         {
           ("Name", (Control)nameTextBox),
@@ -3370,7 +3424,178 @@ namespace TimeTracker
         Margin = new Thickness(0)
       };
       ApplyStyle(grid, "DenseDataGridStyle");
+      grid.CellStyle = CreateCenteredDataGridCellStyle();
       return grid;
+    }
+
+    private static Style CreateCenteredDataGridCellStyle()
+    {
+      Style style = new(typeof(DataGridCell));
+      style.Setters.Add(new Setter(Control.VerticalContentAlignmentProperty, VerticalAlignment.Center));
+      style.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(8, 0, 8, 0)));
+      style.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(0)));
+      return style;
+    }
+
+    private void AutoSizeGridColumnsOnFirstPageOpen(string page, DataGrid grid)
+    {
+      if (!autoSizedPages.Add(page))
+      {
+        return;
+      }
+
+      grid.Loaded += (_, _) =>
+      {
+        grid.Dispatcher.BeginInvoke(
+          () => AutoSizeGridColumnsWithBreathingSpace(grid),
+          DispatcherPriority.Loaded);
+      };
+    }
+
+    private void AutoSizeGridColumnsWithBreathingSpace(DataGrid grid)
+    {
+      if (grid.Columns.Count == 0 || grid.ActualWidth <= 0)
+      {
+        return;
+      }
+
+      double availableWidth = Math.Max(0, grid.ActualWidth - SystemParameters.VerticalScrollBarWidth - 2);
+      if (availableWidth <= 0)
+      {
+        return;
+      }
+
+      List<double> widths = grid.Columns
+        .Select(column => Math.Max(GridColumnMinimumWidth, MeasureGridColumnContent(grid, column) + GridColumnBreathingSpace))
+        .ToList();
+
+      double totalWidth = widths.Sum();
+      while (totalWidth > availableWidth)
+      {
+        int widestIndex = 0;
+        double widestWidth = widths[0];
+
+        for (int index = 1; index < widths.Count; index++)
+        {
+          if (widths[index] > widestWidth)
+          {
+            widestIndex = index;
+            widestWidth = widths[index];
+          }
+        }
+
+        double reducibleWidth = widestWidth - GridColumnMinimumWidth;
+        if (reducibleWidth <= 0)
+        {
+          break;
+        }
+
+        double reduction = Math.Min(reducibleWidth, totalWidth - availableWidth);
+        widths[widestIndex] -= reduction;
+        totalWidth -= reduction;
+      }
+
+      for (int index = 0; index < grid.Columns.Count; index++)
+      {
+        grid.Columns[index].Width = new DataGridLength(widths[index]);
+      }
+    }
+
+    private static double MeasureGridColumnContent(DataGrid grid, DataGridColumn column)
+    {
+      double maxWidth = MeasureGridText(grid, column.Header?.ToString() ?? string.Empty);
+
+      if (column is not DataGridTextColumn textColumn || textColumn.Binding is not Binding binding)
+      {
+        return maxWidth;
+      }
+
+      foreach (object item in grid.Items)
+      {
+        if (item == CollectionView.NewItemPlaceholder)
+        {
+          continue;
+        }
+
+        string text = FormatGridCellValue(item, binding);
+        maxWidth = Math.Max(maxWidth, MeasureGridText(grid, text));
+      }
+
+      return maxWidth;
+    }
+
+    private static double MeasureGridText(DataGrid grid, string text)
+    {
+      FormattedText formattedText = new(
+        text,
+        CultureInfo.CurrentCulture,
+        FlowDirection.LeftToRight,
+        new Typeface(grid.FontFamily, grid.FontStyle, grid.FontWeight, grid.FontStretch),
+        grid.FontSize,
+        Brushes.Black,
+        VisualTreeHelper.GetDpi(grid).PixelsPerDip);
+
+      return Math.Ceiling(formattedText.WidthIncludingTrailingWhitespace);
+    }
+
+    private static string FormatGridCellValue(object item, Binding binding)
+    {
+      object? value = ResolveBindingPathValue(item, binding.Path?.Path);
+
+      if (binding.Converter != null)
+      {
+        value = binding.Converter.Convert(
+          value,
+          typeof(string),
+          binding.ConverterParameter,
+          binding.ConverterCulture ?? CultureInfo.CurrentCulture);
+      }
+
+      if (value == null)
+      {
+        return string.Empty;
+      }
+
+      if (!string.IsNullOrEmpty(binding.StringFormat))
+      {
+        return ApplyBindingStringFormat(value, binding.StringFormat);
+      }
+
+      return Convert.ToString(value, CultureInfo.CurrentCulture) ?? string.Empty;
+    }
+
+    private static string ApplyBindingStringFormat(object value, string stringFormat)
+    {
+      if (stringFormat.Contains("{0", StringComparison.Ordinal))
+      {
+        return string.Format(CultureInfo.CurrentCulture, stringFormat, value);
+      }
+
+      return value is IFormattable formattable
+        ? formattable.ToString(stringFormat, CultureInfo.CurrentCulture)
+        : Convert.ToString(value, CultureInfo.CurrentCulture) ?? string.Empty;
+    }
+
+    private static object? ResolveBindingPathValue(object source, string? path)
+    {
+      if (string.IsNullOrWhiteSpace(path))
+      {
+        return source;
+      }
+
+      object? value = source;
+      foreach (string memberName in path.Split('.'))
+      {
+        if (value == null)
+        {
+          return null;
+        }
+
+        PropertyInfo? property = value.GetType().GetProperty(memberName);
+        value = property?.GetValue(value);
+      }
+
+      return value;
     }
 
     private static List<T> GetSelectedItems<T>(DataGrid grid)
@@ -3521,7 +3746,7 @@ namespace TimeTracker
       TextBox currentInvoiceNumberTextBox = CreateDialogTextBox((client?.CurrentInvoiceNumber > 0 ? client.CurrentInvoiceNumber : 1).ToString());
 
       bool accepted = ShowSimpleForm(
-        client == null ? "New Client" : "Edit Client",
+        client == null ? "New client" : "Edit client",
         new[]
         {
           ("Name", (Control)nameTextBox),
@@ -3586,7 +3811,7 @@ namespace TimeTracker
       TextBox rateTextBox = CreateDialogTextBox(project?.Rate.ToString("0.##") ?? "0");
 
       bool accepted = ShowSimpleForm(
-        project == null ? "New Project" : "Edit Project",
+        project == null ? "New project" : "Edit project",
         new[]
         {
           ("Client", (Control)clientComboBox),
@@ -3634,44 +3859,110 @@ namespace TimeTracker
         Owner = this,
         WindowStartupLocation = WindowStartupLocation.CenterOwner,
         ResizeMode = ResizeMode.NoResize,
-        Width = 340,
+        Width = 520,
         SizeToContent = SizeToContent.Height
       };
 
-      StackPanel panel = new()
+      Grid shell = new();
+      shell.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+      shell.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+      shell.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+      Border header = new()
       {
-        Margin = new Thickness(16)
+        BorderBrush = PanelBorderBrush,
+        BorderThickness = new Thickness(0, 0, 0, 1),
+        Padding = new Thickness(24, 24, 24, 22),
+        Child = new TextBlock
+        {
+          Text = title,
+          FontSize = 23,
+          FontWeight = FontWeights.SemiBold,
+          Foreground = PrimaryTextBrush
+        }
+      };
+      Grid.SetRow(header, 0);
+      shell.Children.Add(header);
+
+      StackPanel form = new()
+      {
+        Margin = new Thickness(24, 22, 24, 14)
       };
 
       foreach ((string label, Control input) in fields)
       {
-        panel.Children.Add(new TextBlock
+        form.Children.Add(new TextBlock
         {
           Text = label,
+          Foreground = PrimaryTextBrush,
+          FontSize = 14,
           FontWeight = FontWeights.SemiBold,
           Margin = new Thickness(0, 0, 0, 4)
         });
-        input.Margin = new Thickness(0, 0, 0, 12);
-        panel.Children.Add(input);
-      }
 
-      StackPanel buttons = new()
+        PrepareDialogInput(input);
+        form.Children.Add(input);
+      }
+      Grid.SetRow(form, 1);
+      shell.Children.Add(form);
+
+      Border footer = new()
       {
-        Orientation = Orientation.Horizontal,
-        HorizontalAlignment = HorizontalAlignment.Right
+        BorderBrush = PanelBorderBrush,
+        BorderThickness = new Thickness(0, 1, 0, 0),
+        Padding = new Thickness(24, 16, 24, 18)
       };
-      Button cancelButton = new() { Content = "Cancel", Width = 80, Height = 28, Margin = new Thickness(0, 0, 8, 0), IsCancel = true };
-      Button saveButton = new() { Content = "Save", Width = 80, Height = 28, IsDefault = true };
+      Grid buttons = new();
+      buttons.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+      buttons.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+      buttons.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+      Button cancelButton = new() { Content = "Cancel", MinWidth = 104, Height = 36, IsCancel = true };
+      Button saveButton = new() { Content = "Save", MinWidth = 104, Height = 36, IsDefault = true };
       ApplyStyle(cancelButton, "SecondaryButtonStyle");
       ApplyStyle(saveButton, "PrimaryButtonStyle");
       saveButton.Click += (_, _) => dialog.DialogResult = true;
       buttons.Children.Add(cancelButton);
+      Grid.SetColumn(saveButton, 2);
       buttons.Children.Add(saveButton);
-      panel.Children.Add(buttons);
+      footer.Child = buttons;
+      Grid.SetRow(footer, 2);
+      shell.Children.Add(footer);
 
-      dialog.Content = panel;
+      dialog.Content = shell;
 
       return dialog.ShowDialog() == true;
+    }
+
+    private static void PrepareDialogInput(Control input)
+    {
+      input.Margin = new Thickness(0, 0, 0, 14);
+      input.HorizontalAlignment = HorizontalAlignment.Stretch;
+
+      if (input is CheckBox checkBox)
+      {
+        checkBox.Margin = new Thickness(0, 4, 0, 14);
+        checkBox.VerticalAlignment = VerticalAlignment.Center;
+        return;
+      }
+
+      input.Width = double.NaN;
+
+      if (input is TextBox textBox)
+      {
+        textBox.Height = 42;
+        textBox.Padding = new Thickness(12, 0, 12, 0);
+        textBox.VerticalContentAlignment = VerticalAlignment.Center;
+      }
+      else if (input is ComboBox comboBox)
+      {
+        comboBox.Height = 42;
+        comboBox.Padding = new Thickness(10, 0, 10, 0);
+        comboBox.VerticalContentAlignment = VerticalAlignment.Center;
+      }
+      else if (input is DatePicker datePicker)
+      {
+        datePicker.Height = 42;
+      }
     }
 
     private static TextBox CreateDialogTextBox(string text)

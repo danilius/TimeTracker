@@ -235,7 +235,6 @@
             x:Name="ProjectComboBox"
             DisplayMemberPath="Name"
             IsEditable="True"
-            SelectionChanged="ProjectComboBox_SelectionChanged"
             Text="{Binding ProjectName, UpdateSourceTrigger=LostFocus}" />
         </StackPanel>
 

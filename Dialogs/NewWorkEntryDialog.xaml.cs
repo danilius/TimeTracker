@@ -65,7 +65,7 @@ namespace TimeTracker.Dialogs
     private void LoadCombos()
     {
       ClientComboBox.ItemsSource = TimeTrackerModel.Instance.ActiveClients;
-      ProjectComboBox.ItemsSource = TimeTrackerModel.Instance.Projects;
+      ProjectComboBox.ItemsSource = null;
     }
 
     private void LoadBillingDefaults()
@@ -116,21 +116,9 @@ namespace TimeTracker.Dialogs
         return;
       }
 
-      ProjectComboBox.ItemsSource = TimeTrackerModel.Instance.Projects.Where(p => p.Client == selectedClient);
-      ProjectComboBox.SelectedIndex = 0;
-
       if (!_isEditingExistingEntry)
       {
         ApplyClientBillingDefaults(selectedClient);
-      }
-    }
-
-    private void ProjectComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-      if (ProjectComboBox.SelectedItem is Project selectedProject && ClientComboBox.SelectedItem == null)
-      {
-        ClientComboBox.ItemsSource = TimeTrackerModel.Instance.ActiveClients.Where(c => c == selectedProject.Client);
-        ClientComboBox.SelectedIndex = 0;
       }
     }
 
@@ -141,17 +129,42 @@ namespace TimeTracker.Dialogs
         return;
       }
 
-      string typedName = ClientComboBox.Text.Trim();
-      bool clientExists = !string.IsNullOrEmpty(typedName)
-        && TimeTrackerModel.Instance.ActiveClients.Any(c => string.Equals(c.Name, typedName, StringComparison.OrdinalIgnoreCase));
+      // The project list is driven entirely by the resolved client. Projects are only
+      // offered once a client is filled in; a new/unknown client offers none, so typing
+      // a project name can never auto-match another client's project (and flip the client).
+      Client? client = ResolveTypedClient();
+      Project? currentProject = ProjectComboBox.SelectedItem as Project;
 
-      // A brand new client is being created, so any existing project no longer applies.
-      if (!clientExists)
+      if (client == null)
+      {
+        ProjectComboBox.ItemsSource = null;
+        ProjectComboBox.SelectedItem = null;
+        ProjectComboBox.Text = string.Empty;
+        return;
+      }
+
+      ProjectComboBox.ItemsSource = client.Projects;
+
+      // Drop any project left over from a different client.
+      if (currentProject != null && currentProject.Client != client)
       {
         ProjectComboBox.SelectedItem = null;
         ProjectComboBox.Text = string.Empty;
-        ProjectComboBox.ItemsSource = TimeTrackerModel.Instance.Projects;
       }
+    }
+
+    private Client? ResolveTypedClient()
+    {
+      if (ClientComboBox.SelectedItem is Client selected)
+      {
+        return selected;
+      }
+
+      string typedName = ClientComboBox.Text.Trim();
+      return string.IsNullOrEmpty(typedName)
+        ? null
+        : TimeTrackerModel.Instance.ActiveClients
+            .FirstOrDefault(c => string.Equals(c.Name, typedName, StringComparison.OrdinalIgnoreCase));
     }
 
     private void ApplyClientBillingDefaults(Client client)

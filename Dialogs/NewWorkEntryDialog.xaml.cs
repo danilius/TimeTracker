@@ -79,7 +79,7 @@ namespace TimeTracker.Dialogs
     private void HookDurationUpdates()
     {
       DependencyPropertyDescriptor descriptor =
-        DependencyPropertyDescriptor.FromProperty(DateTimePicker.SelectedDateProperty, typeof(DateTimePicker));
+        DependencyPropertyDescriptor.FromProperty(StackedDateTimePicker.SelectedDateProperty, typeof(StackedDateTimePicker));
       descriptor?.AddValueChanged(StartTimePicker, (_, _) => UpdateDurationDisplay());
       descriptor?.AddValueChanged(EndTimePicker, (_, _) => UpdateDurationDisplay());
     }
@@ -134,6 +134,26 @@ namespace TimeTracker.Dialogs
       }
     }
 
+    private void ClientComboBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+      if (ProjectComboBox == null)
+      {
+        return;
+      }
+
+      string typedName = ClientComboBox.Text.Trim();
+      bool clientExists = !string.IsNullOrEmpty(typedName)
+        && TimeTrackerModel.Instance.ActiveClients.Any(c => string.Equals(c.Name, typedName, StringComparison.OrdinalIgnoreCase));
+
+      // A brand new client is being created, so any existing project no longer applies.
+      if (!clientExists)
+      {
+        ProjectComboBox.SelectedItem = null;
+        ProjectComboBox.Text = string.Empty;
+        ProjectComboBox.ItemsSource = TimeTrackerModel.Instance.Projects;
+      }
+    }
+
     private void ApplyClientBillingDefaults(Client client)
     {
       HourlyRateTextBox.Text = client.DefaultHourlyRate.ToString("0.##");
@@ -142,64 +162,6 @@ namespace TimeTracker.Dialogs
       {
         CurrencyComboBox.Text = client.DefaultCurrency;
       }
-    }
-
-    private void CreateClientButton_Click(object sender, RoutedEventArgs e)
-    {
-      string name = ClientComboBox.Text.Trim();
-      if (string.IsNullOrWhiteSpace(name))
-      {
-        ClientComboBox.BorderBrush = Brushes.Red;
-        MessageBox.Show("Please type a client name first, then create it.");
-        ClientComboBox.Focus();
-        return;
-      }
-
-      ClientComboBox.BorderBrush = null;
-
-      Client client = TimeTrackerModel.Instance.ActiveClients
-        .FirstOrDefault(c => string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase))
-        ?? TimeTrackerModel.Instance.CreateClient(name);
-
-      ClientComboBox.ItemsSource = TimeTrackerModel.Instance.ActiveClients;
-      ClientComboBox.SelectedItem = client;
-      ProjectComboBox.Focus();
-    }
-
-    private void CreateProjectButton_Click(object sender, RoutedEventArgs e)
-    {
-      string clientName = ClientComboBox.Text.Trim();
-      if (string.IsNullOrWhiteSpace(clientName))
-      {
-        ClientComboBox.BorderBrush = Brushes.Red;
-        MessageBox.Show("Please choose or create a client before adding a project.");
-        ClientComboBox.Focus();
-        return;
-      }
-
-      string projectName = ProjectComboBox.Text.Trim();
-      if (string.IsNullOrWhiteSpace(projectName))
-      {
-        ProjectComboBox.BorderBrush = Brushes.Red;
-        MessageBox.Show("Please type a project name first, then create it.");
-        ProjectComboBox.Focus();
-        return;
-      }
-
-      ProjectComboBox.BorderBrush = null;
-
-      Client client = TimeTrackerModel.Instance.ActiveClients
-        .FirstOrDefault(c => string.Equals(c.Name, clientName, StringComparison.OrdinalIgnoreCase))
-        ?? TimeTrackerModel.Instance.CreateClient(clientName);
-
-      Project project = client.Projects
-        .FirstOrDefault(p => string.Equals(p.Name, projectName, StringComparison.OrdinalIgnoreCase))
-        ?? TimeTrackerModel.Instance.CreateProject(client, projectName, DescriptionTextBox.Text.Trim());
-
-      ClientComboBox.ItemsSource = TimeTrackerModel.Instance.ActiveClients;
-      ClientComboBox.SelectedItem = client;
-      ProjectComboBox.ItemsSource = TimeTrackerModel.Instance.Projects.Where(p => p.Client == client).ToList();
-      ProjectComboBox.SelectedItem = project;
     }
 
     private void RateUpButton_Click(object sender, RoutedEventArgs e)
@@ -299,12 +261,6 @@ namespace TimeTracker.Dialogs
       StartTime = StartTimerNow ? DateTime.Now : StartTimePicker.SelectedDate;
 
       DialogResult = true;
-      Close();
-    }
-
-    private void CloseButton_Click(object sender, RoutedEventArgs e)
-    {
-      DialogResult = false;
       Close();
     }
 

@@ -8,9 +8,9 @@
   xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
   Title="New work entry"
   Width="780"
-  Height="660"
+  Height="700"
   MinWidth="740"
-  MinHeight="620"
+  MinHeight="660"
   Loaded="Window_Loaded"
   ResizeMode="NoResize"
   WindowStartupLocation="CenterOwner"
@@ -40,14 +40,6 @@
       <Setter Property="Foreground" Value="{StaticResource SecondaryTextBrush}" />
       <Setter Property="FontSize" Value="16" />
       <Setter Property="VerticalAlignment" Value="Center" />
-    </Style>
-
-    <Style x:Key="CreateLinkStyle" TargetType="TextBlock">
-      <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
-      <Setter Property="FontSize" Value="13" />
-      <Setter Property="Margin" Value="2,7,0,0" />
-      <Setter Property="Cursor" Value="Hand" />
-      <Setter Property="TextDecorations" Value="Underline" />
     </Style>
 
     <Style x:Key="DialogInputStyle" TargetType="Control">
@@ -121,16 +113,6 @@
       </Setter>
     </Style>
 
-    <Style x:Key="SmallIconButtonStyle" BasedOn="{StaticResource DialogButtonBaseStyle}" TargetType="Button">
-      <Setter Property="Width" Value="42" />
-      <Setter Property="MinWidth" Value="42" />
-      <Setter Property="Height" Value="42" />
-      <Setter Property="Padding" Value="0" />
-      <Setter Property="FontSize" Value="22" />
-      <Setter Property="FontWeight" Value="Normal" />
-    </Style>
-
-    <!--  Small stepper (up/down) button used by the hourly rate field  -->
     <Style x:Key="StepperButtonStyle" TargetType="Button">
       <Setter Property="Background" Value="#F5F7FA" />
       <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
@@ -212,17 +194,6 @@
           FontWeight="SemiBold"
           Foreground="{StaticResource PrimaryTextBrush}"
           Text="New work entry" />
-        <Button
-          Width="36"
-          Height="36"
-          HorizontalAlignment="Right"
-          VerticalAlignment="Center"
-          Background="Transparent"
-          BorderThickness="0"
-          Click="CloseButton_Click"
-          Content="&#xE711;"
-          FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
-          FontSize="14" />
       </Grid>
     </Border>
 
@@ -248,63 +219,24 @@
         <!--  Client  -->
         <StackPanel Grid.Row="0" Grid.Column="0">
           <TextBlock Style="{StaticResource DialogLabelStyle}" Text="Client" />
-          <Grid>
-            <Grid.ColumnDefinitions>
-              <ColumnDefinition Width="*" />
-              <ColumnDefinition Width="8" />
-              <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-            <ComboBox
-              x:Name="ClientComboBox"
-              Grid.Column="0"
-              DisplayMemberPath="Name"
-              IsEditable="True"
-              SelectionChanged="ClientComboBox_SelectionChanged"
-              Text="{Binding ClientName, UpdateSourceTrigger=PropertyChanged}" />
-            <Button
-              Grid.Column="2"
-              Click="CreateClientButton_Click"
-              Content="&#xE710;"
-              FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
-              FontSize="16"
-              Style="{StaticResource SmallIconButtonStyle}"
-              ToolTip="Create client" />
-          </Grid>
-          <TextBlock
-            MouseLeftButtonUp="CreateClientButton_Click"
-            Style="{StaticResource CreateLinkStyle}"
-            Text="Create client" />
+          <ComboBox
+            x:Name="ClientComboBox"
+            DisplayMemberPath="Name"
+            IsEditable="True"
+            SelectionChanged="ClientComboBox_SelectionChanged"
+            TextBoxBase.TextChanged="ClientComboBox_TextChanged"
+            Text="{Binding ClientName, UpdateSourceTrigger=PropertyChanged}" />
         </StackPanel>
 
         <!--  Project  -->
         <StackPanel Grid.Row="0" Grid.Column="2">
           <TextBlock Style="{StaticResource DialogLabelStyle}" Text="Project" />
-          <Grid>
-            <Grid.ColumnDefinitions>
-              <ColumnDefinition Width="*" />
-              <ColumnDefinition Width="8" />
-              <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-            <ComboBox
-              x:Name="ProjectComboBox"
-              Grid.Column="0"
-              DisplayMemberPath="Name"
-              IsEditable="True"
-              SelectionChanged="ProjectComboBox_SelectionChanged"
-              Text="{Binding ProjectName, UpdateSourceTrigger=LostFocus}" />
-            <Button
-              Grid.Column="2"
-              Click="CreateProjectButton_Click"
-              Content="&#xE710;"
-              FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
-              FontSize="16"
-              Style="{StaticResource SmallIconButtonStyle}"
-              ToolTip="Create project" />
-          </Grid>
-          <TextBlock
-            MouseLeftButtonUp="CreateProjectButton_Click"
-            Style="{StaticResource CreateLinkStyle}"
-            Text="Create project" />
+          <ComboBox
+            x:Name="ProjectComboBox"
+            DisplayMemberPath="Name"
+            IsEditable="True"
+            SelectionChanged="ProjectComboBox_SelectionChanged"
+            Text="{Binding ProjectName, UpdateSourceTrigger=LostFocus}" />
         </StackPanel>
 
         <!--  Description  -->
@@ -316,12 +248,10 @@
           <TextBlock Style="{StaticResource DialogLabelStyle}" Text="Description" />
           <TextBox
             x:Name="DescriptionTextBox"
-            Height="80"
-            VerticalContentAlignment="Top"
-            AcceptsReturn="True"
-            Padding="12,8"
+            Height="42"
+            AcceptsReturn="False"
             Text="{Binding Description}"
-            TextWrapping="Wrap" />
+            TextWrapping="NoWrap" />
         </StackPanel>
 
         <!--  Start / End / Duration  -->
@@ -340,18 +270,20 @@
 
           <StackPanel Grid.Column="0">
             <TextBlock Style="{StaticResource DialogLabelStyle}" Text="Start" />
-            <Controls:DateTimePicker x:Name="StartTimePicker" SelectedDate="{Binding StartTime}" />
+            <Controls:StackedDateTimePicker x:Name="StartTimePicker" SelectedDate="{Binding StartTime}" />
           </StackPanel>
 
           <StackPanel Grid.Column="2">
             <TextBlock Style="{StaticResource DialogLabelStyle}" Text="End" />
-            <Controls:DateTimePicker x:Name="EndTimePicker" SelectedDate="{Binding EndTime}" />
+            <Controls:StackedDateTimePicker x:Name="EndTimePicker" SelectedDate="{Binding EndTime}" />
           </StackPanel>
 
-          <StackPanel Grid.Column="4">
+          <StackPanel Grid.Column="4" VerticalAlignment="Top">
             <TextBlock Style="{StaticResource DialogLabelStyle}" Text="Duration" />
             <Border
+              Width="140"
               Height="42"
+              HorizontalAlignment="Left"
               Background="{StaticResource LockedFieldBrush}"
               BorderBrush="{StaticResource BorderBrush}"
               BorderThickness="1"

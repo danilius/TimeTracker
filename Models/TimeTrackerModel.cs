@@ -360,15 +360,15 @@ namespace TimeTracker.Models
 
     public event EventHandler<WorkEntryEventArgs>? WorkEntryAdded;
 
-    public WorkEntry CreateWorkEntry(string clientName, string projectName, DateTime startTime, string? description, decimal? hourlyRate = null, string? currency = null, TimeSpan? duration = null)
+    public WorkEntry CreateWorkEntry(string clientName, string projectName, DateTime startTime, string? description, decimal? hourlyRate = null, string? currency = null, TimeSpan? duration = null, bool isBillable = true)
     {
       Client client = FindOrCreateClient(clientName);
       Project project = FindOrCreateProject(client, projectName, description);
 
-      return CreateWorkEntry(project, startTime, description, hourlyRate, currency, duration);
+      return CreateWorkEntry(project, startTime, description, hourlyRate, currency, duration, isBillable);
     }
 
-    public WorkEntry CreateWorkEntry(Project project, DateTime startTime, string? description, decimal? hourlyRate = null, string? currency = null, TimeSpan? duration = null)
+    public WorkEntry CreateWorkEntry(Project project, DateTime startTime, string? description, decimal? hourlyRate = null, string? currency = null, TimeSpan? duration = null, bool isBillable = true)
     {
       TTAppSettings settings = TTAppSettings.Instance;
       Client? client = project.Client;
@@ -379,6 +379,7 @@ namespace TimeTracker.Models
         StartTime = startTime,
         EndTime = startTime + (duration ?? TimeSpan.Zero),
         Description = description,
+        IsBillable = isBillable,
         HourlyRate = hourlyRate ?? client?.DefaultHourlyRate ?? settings.DefaultHourlyRate,
         Currency = string.IsNullOrWhiteSpace(currency)
           ? (string.IsNullOrWhiteSpace(client?.DefaultCurrency) ? settings.DefaultCurrency : client.DefaultCurrency)
@@ -580,7 +581,7 @@ namespace TimeTracker.Models
       SaveData();
     }
 
-    public void UpdateWorkEntry(WorkEntry workEntry, Project project, DateTime startTime, string? description, decimal hourlyRate, string currency, TimeSpan? duration = null)
+    public void UpdateWorkEntry(WorkEntry workEntry, Project project, DateTime startTime, string? description, decimal hourlyRate, string currency, TimeSpan? duration = null, bool isBillable = true)
     {
       if (workEntry.Project != project)
       {
@@ -605,6 +606,7 @@ namespace TimeTracker.Models
 
       workEntry.Description = description;
       workEntry.HourlyRate = hourlyRate;
+      workEntry.IsBillable = isBillable;
       workEntry.Currency = TTAppSettings.NormalizeCurrency(currency);
 
       if (!workEntry.IsRunning && workEntry.EndTime < workEntry.StartTime)
@@ -615,12 +617,12 @@ namespace TimeTracker.Models
       SaveData();
     }
 
-    public void UpdateWorkEntry(WorkEntry workEntry, string clientName, string projectName, DateTime startTime, string? description, decimal hourlyRate, string currency, TimeSpan? duration = null)
+    public void UpdateWorkEntry(WorkEntry workEntry, string clientName, string projectName, DateTime startTime, string? description, decimal hourlyRate, string currency, TimeSpan? duration = null, bool isBillable = true)
     {
       Client client = FindOrCreateClient(clientName);
       Project project = FindOrCreateProject(client, projectName, description);
 
-      UpdateWorkEntry(workEntry, project, startTime, description, hourlyRate, currency, duration);
+      UpdateWorkEntry(workEntry, project, startTime, description, hourlyRate, currency, duration, isBillable);
     }
 
     public void UpdateClient(Client client, string name, string address, string companyName = "", string email = "", string phone = "", string invoiceNumberPrefix = "", int currentInvoiceNumber = 1, decimal defaultHourlyRate = 0, string defaultCurrency = "")

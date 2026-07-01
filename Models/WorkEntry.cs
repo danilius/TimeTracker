@@ -104,6 +104,20 @@ namespace TimeTracker.Models
     [JsonIgnore]
     public string ProjectName => Project?.Name ?? string.Empty;
 
+    private bool _isBillable = true;
+    public bool IsBillable
+    {
+      get { return _isBillable; }
+      set
+      {
+        if (_isBillable != value)
+        {
+          _isBillable = value;
+          OnPropertyChanged();
+        }
+      }
+    }
+
     private decimal _hourlyRate;
     public decimal HourlyRate
     {

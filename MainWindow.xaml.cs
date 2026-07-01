@@ -84,7 +84,8 @@ namespace TimeTracker
             dialog.Description,
             dialog.HourlyRate,
             dialog.Currency,
-            dialog.Duration);
+            dialog.Duration,
+            dialog.IsBillable);
           timeTracker.StartWork(workEntry);
         }
       }
@@ -1652,12 +1653,12 @@ namespace TimeTracker
       {
         Width = 16,
         Height = 16,
-        Background = SuccessBrush,
+        Background = workEntry.IsBillable ? SuccessBrush : SecondaryTextBrush,
         CornerRadius = new CornerRadius(3),
         Margin = new Thickness(0, 0, 8, 0),
         Child = new TextBlock
         {
-          Text = "\uE73E",
+          Text = workEntry.IsBillable ? "\uE73E" : "\uE711",
           FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),
           FontSize = 10,
           Foreground = Brushes.White,
@@ -1667,7 +1668,9 @@ namespace TimeTracker
       });
       line.Children.Add(new TextBlock
       {
-        Text = $"Billable  {workEntry.Currency}{workEntry.HourlyRate:0.##}/hr",
+        Text = workEntry.IsBillable
+          ? $"Billable  {workEntry.Currency}{workEntry.HourlyRate:0.##}/hr"
+          : "Non-billable",
         Foreground = PrimaryTextBrush,
         VerticalAlignment = VerticalAlignment.Center
       });
@@ -1691,7 +1694,8 @@ namespace TimeTracker
           dialog.Description,
           dialog.HourlyRate,
           dialog.Currency,
-          dialog.Duration);
+          dialog.Duration,
+          dialog.IsBillable);
 
         if (startNow || dialog.StartTimerNow)
         {
@@ -3058,7 +3062,8 @@ namespace TimeTracker
           dialog.Description,
           dialog.HourlyRate,
           dialog.Currency,
-          dialog.Duration);
+          dialog.Duration,
+          dialog.IsBillable);
         if (dialog.StartTimerNow)
         {
           timeTracker.StartWork(workEntry);
@@ -3085,7 +3090,8 @@ namespace TimeTracker
           dialog.Description,
           dialog.HourlyRate,
           dialog.Currency,
-          dialog.Duration);
+          dialog.Duration,
+          dialog.IsBillable);
       }
     }
 

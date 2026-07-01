@@ -1,10 +1,12 @@
 ﻿using System;
+using System.ComponentModel;
 using System.Globalization;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using TimeTracker.Controls;
 using TimeTracker.Models;
 using TimeTracker.Utils;
 
@@ -15,7 +17,6 @@ namespace TimeTracker.Dialogs
   /// </summary>
   public partial class NewWorkEntryDialog : Window
   {
-    //private WorkEntry _workEntry;
     private bool _isEditingExistingEntry;
 
     public NewWorkEntryDialog()
@@ -25,8 +26,8 @@ namespace TimeTracker.Dialogs
       LoadCombos();
       LoadBillingDefaults();
       AttachNumericPasteFilters();
-
-      //_workEntry = workEntry;
+      HookDurationUpdates();
+      UpdateDurationDisplay();
     }
 
     public NewWorkEntryDialog(WorkEntry workEntry) : this()
@@ -41,16 +42,15 @@ namespace TimeTracker.Dialogs
       ProjectComboBox.Text = workEntry.Project?.Name ?? string.Empty;
       DescriptionTextBox.Text = workEntry.Description ?? string.Empty;
       StartTimePicker.SelectedDate = workEntry.StartTime;
-      DurationHoursTextBox.Text = ((int)workEntry.Duration.TotalHours).ToString();
-      DurationMinutesTextBox.Text = workEntry.Duration.Minutes.ToString("D2");
+      EndTimePicker.SelectedDate = workEntry.EndTime == default
+        ? workEntry.StartTime + workEntry.Duration
+        : workEntry.EndTime;
       HourlyRateTextBox.Text = workEntry.HourlyRate.ToString("0.##");
       CurrencyComboBox.Text = workEntry.Currency;
-    }
+      BillableToggle.IsChecked = workEntry.IsBillable;
 
-    //public WorkEntry WorkEntry
-    //{
-    //  get => _workEntry;
-    //}
+      UpdateDurationDisplay();
+    }
 
     public string ClientName { get; private set; } = string.Empty;
     public string ProjectName { get; private set; } = string.Empty;
@@ -59,6 +59,7 @@ namespace TimeTracker.Dialogs
     public string Currency { get; private set; } = string.Empty;
     public DateTime StartTime { get; private set; }
     public TimeSpan? Duration { get; private set; }
+    public bool IsBillable { get; private set; } = true;
     public bool StartTimerNow { get; private set; }
 
     private void LoadCombos()
@@ -73,8 +74,39 @@ namespace TimeTracker.Dialogs
       HourlyRateTextBox.Text = settings.DefaultHourlyRate.ToString("0.##");
       CurrencyComboBox.ItemsSource = MajorCurrencySymbols;
       CurrencyComboBox.Text = settings.DefaultCurrency;
-      DurationHoursTextBox.Text = "0";
-      DurationMinutesTextBox.Text = "00";
+    }
+
+    private void HookDurationUpdates()
+    {
+      DependencyPropertyDescriptor descriptor =
+        DependencyPropertyDescriptor.FromProperty(DateTimePicker.SelectedDateProperty, typeof(DateTimePicker));
+      descriptor?.AddValueChanged(StartTimePicker, (_, _) => UpdateDurationDisplay());
+      descriptor?.AddValueChanged(EndTimePicker, (_, _) => UpdateDurationDisplay());
+    }
+
+    private void UpdateDurationDisplay()
+    {
+      if (StartTimerNowCheckBox.IsChecked == true)
+      {
+        DurationDisplayText.Text = "Running";
+        return;
+      }
+
+      TimeSpan duration = EndTimePicker.SelectedDate - StartTimePicker.SelectedDate;
+      DurationDisplayText.Text = duration <= TimeSpan.Zero ? "0m" : FormatDuration(duration);
+    }
+
+    private static string FormatDuration(TimeSpan duration)
+    {
+      int hours = (int)duration.TotalHours;
+      int minutes = duration.Minutes;
+
+      if (hours > 0 && minutes > 0)
+      {
+        return $"{hours}h {minutes}m";
+      }
+
+      return hours > 0 ? $"{hours}h" : $"{minutes}m";
     }
 
     private void ClientComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -112,11 +144,92 @@ namespace TimeTracker.Dialogs
       }
     }
 
+    private void CreateClientButton_Click(object sender, RoutedEventArgs e)
+    {
+      string name = ClientComboBox.Text.Trim();
+      if (string.IsNullOrWhiteSpace(name))
+      {
+        ClientComboBox.BorderBrush = Brushes.Red;
+        MessageBox.Show("Please type a client name first, then create it.");
+        ClientComboBox.Focus();
+        return;
+      }
+
+      ClientComboBox.BorderBrush = null;
+
+      Client client = TimeTrackerModel.Instance.ActiveClients
+        .FirstOrDefault(c => string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase))
+        ?? TimeTrackerModel.Instance.CreateClient(name);
+
+      ClientComboBox.ItemsSource = TimeTrackerModel.Instance.ActiveClients;
+      ClientComboBox.SelectedItem = client;
+      ProjectComboBox.Focus();
+    }
+
+    private void CreateProjectButton_Click(object sender, RoutedEventArgs e)
+    {
+      string clientName = ClientComboBox.Text.Trim();
+      if (string.IsNullOrWhiteSpace(clientName))
+      {
+        ClientComboBox.BorderBrush = Brushes.Red;
+        MessageBox.Show("Please choose or create a client before adding a project.");
+        ClientComboBox.Focus();
+        return;
+      }
+
+      string projectName = ProjectComboBox.Text.Trim();
+      if (string.IsNullOrWhiteSpace(projectName))
+      {
+        ProjectComboBox.BorderBrush = Brushes.Red;
+        MessageBox.Show("Please type a project name first, then create it.");
+        ProjectComboBox.Focus();
+        return;
+      }
+
+      ProjectComboBox.BorderBrush = null;
+
+      Client client = TimeTrackerModel.Instance.ActiveClients
+        .FirstOrDefault(c => string.Equals(c.Name, clientName, StringComparison.OrdinalIgnoreCase))
+        ?? TimeTrackerModel.Instance.CreateClient(clientName);
+
+      Project project = client.Projects
+        .FirstOrDefault(p => string.Equals(p.Name, projectName, StringComparison.OrdinalIgnoreCase))
+        ?? TimeTrackerModel.Instance.CreateProject(client, projectName, DescriptionTextBox.Text.Trim());
+
+      ClientComboBox.ItemsSource = TimeTrackerModel.Instance.ActiveClients;
+      ClientComboBox.SelectedItem = client;
+      ProjectComboBox.ItemsSource = TimeTrackerModel.Instance.Projects.Where(p => p.Client == client).ToList();
+      ProjectComboBox.SelectedItem = project;
+    }
+
+    private void RateUpButton_Click(object sender, RoutedEventArgs e)
+    {
+      StepRate(1);
+    }
+
+    private void RateDownButton_Click(object sender, RoutedEventArgs e)
+    {
+      StepRate(-1);
+    }
+
+    private void StepRate(decimal delta)
+    {
+      decimal.TryParse(HourlyRateTextBox.Text, out decimal rate);
+      rate = Math.Max(0, rate + delta);
+      HourlyRateTextBox.Text = rate.ToString("0.##");
+    }
+
+    private void StartTimerNowCheckBox_Changed(object sender, RoutedEventArgs e)
+    {
+      bool startNow = StartTimerNowCheckBox.IsChecked == true;
+      EndTimePicker.IsEnabled = !startNow;
+      UpdateDurationDisplay();
+    }
+
     private void StartButton_Click(object sender, RoutedEventArgs e)
     {
-      StartTimerNow = sender == StartButton;
+      StartTimerNow = sender == StartButton || StartTimerNowCheckBox.IsChecked == true;
 
-      // is the client name or project name empty?
       if (string.IsNullOrWhiteSpace(ClientComboBox.Text))
       {
         ClientComboBox.BorderBrush = Brushes.Red;
@@ -150,38 +263,27 @@ namespace TimeTracker.Dialogs
         return;
       }
 
-      if (!string.IsNullOrWhiteSpace(DurationHoursTextBox.Text) || !string.IsNullOrWhiteSpace(DurationMinutesTextBox.Text))
-      {
-        string durationHoursText = string.IsNullOrWhiteSpace(DurationHoursTextBox.Text) ? "0" : DurationHoursTextBox.Text;
-        string durationMinutesText = string.IsNullOrWhiteSpace(DurationMinutesTextBox.Text) ? "0" : DurationMinutesTextBox.Text;
-
-        if (!int.TryParse(durationHoursText, out int durationHours) || durationHours < 0)
-        {
-          DurationHoursTextBox.BorderBrush = Brushes.Red;
-          MessageBox.Show("Please enter duration hours of zero or greater.");
-          return;
-        }
-
-        if (!int.TryParse(durationMinutesText, out int durationMinutes) || durationMinutes < 0 || durationMinutes > 59)
-        {
-          DurationMinutesTextBox.BorderBrush = Brushes.Red;
-          MessageBox.Show("Please enter duration minutes between 0 and 59.");
-          return;
-        }
-
-        Duration = new TimeSpan(durationHours, durationMinutes, 0);
-      }
-      else
+      if (StartTimerNow)
       {
         Duration = null;
       }
-
-      if (!StartTimerNow && (Duration == null || Duration.Value.TotalMinutes < 1))
+      else
       {
-        DurationHoursTextBox.BorderBrush = Brushes.Red;
-        DurationMinutesTextBox.BorderBrush = Brushes.Red;
-        MessageBox.Show("Please enter at least one minute of work before saving an entry.");
-        return;
+        TimeSpan duration = EndTimePicker.SelectedDate - StartTimePicker.SelectedDate;
+
+        if (duration <= TimeSpan.Zero)
+        {
+          MessageBox.Show("The end time must be after the start time.");
+          return;
+        }
+
+        if (duration.TotalMinutes < 1)
+        {
+          MessageBox.Show("Please enter at least one minute of work before saving an entry.");
+          return;
+        }
+
+        Duration = duration;
       }
 
       if (string.IsNullOrWhiteSpace(CurrencyComboBox.Text))
@@ -193,11 +295,8 @@ namespace TimeTracker.Dialogs
 
       HourlyRate = hourlyRate;
       Currency = TTAppSettings.NormalizeCurrency(CurrencyComboBox.Text);
+      IsBillable = BillableToggle.IsChecked == true;
       StartTime = StartTimerNow ? DateTime.Now : StartTimePicker.SelectedDate;
-      if (StartTimerNow)
-      {
-        Duration = null;
-      }
 
       DialogResult = true;
       Close();
@@ -214,11 +313,6 @@ namespace TimeTracker.Dialogs
       ClientComboBox.Focus();
     }
 
-    private void WholeNumberTextBox_PreviewTextInput(object sender, TextCompositionEventArgs e)
-    {
-      e.Handled = !e.Text.All(char.IsDigit);
-    }
-
     private void DecimalTextBox_PreviewTextInput(object sender, TextCompositionEventArgs e)
     {
       if (sender is not TextBox textBox)
@@ -232,24 +326,7 @@ namespace TimeTracker.Dialogs
 
     private void AttachNumericPasteFilters()
     {
-      DataObject.AddPastingHandler(DurationHoursTextBox, WholeNumberTextBox_Pasting);
-      DataObject.AddPastingHandler(DurationMinutesTextBox, WholeNumberTextBox_Pasting);
       DataObject.AddPastingHandler(HourlyRateTextBox, DecimalTextBox_Pasting);
-    }
-
-    private void WholeNumberTextBox_Pasting(object sender, DataObjectPastingEventArgs e)
-    {
-      if (!e.DataObject.GetDataPresent(DataFormats.Text))
-      {
-        e.CancelCommand();
-        return;
-      }
-
-      string text = (string)e.DataObject.GetData(DataFormats.Text);
-      if (!text.All(char.IsDigit))
-      {
-        e.CancelCommand();
-      }
     }
 
     private void DecimalTextBox_Pasting(object sender, DataObjectPastingEventArgs e)
@@ -306,50 +383,5 @@ namespace TimeTracker.Dialogs
       "z\u0142",
       "\u062F.\u0625"
     };
-
-    //private void PrepWorkEntry(WorkEntry workEntry)
-    //{
-    //  // does this client exist?
-    //  var client = TimeTrackerModel.Instance.Clients.FirstOrDefault(c => c.Name == newWorkEntryModel.ClientName);
-
-    //  if (client == null)
-    //  {
-    //    // create a new client
-    //    client = new Client()
-    //    {
-    //      Name = newWorkEntryModel.ClientName,
-    //      ID = Guid.NewGuid()
-    //    };
-
-    //    // add it to the list of clients
-    //    TimeTrackerModel.Instance.Clients.Add(client);
-    //  }
-
-    //  // does this project exist?
-    //  Project? project = TimeTrackerModel.Instance.Projects.FirstOrDefault(p => p.Name == newWorkEntryModel.ProjectName);
-
-    //  if (project == null)
-    //  {
-    //    project = new Project()
-    //    {
-    //      Name = newWorkEntryModel.ProjectName,
-    //      ClientID = client.ID,
-    //      ProjectColour = GenerateRandomPastelColor(),
-    //      ID = Guid.NewGuid()
-    //    };
-
-    //    client.Projects.Add(project);
-    //  }
-
-    //  project.WorkEntries.Add(workEntry);
-
-    //  workEntry.ProjectID = project.ID;
-    //  workEntry.ClientID = client.ID;
-
-
-    //  workEntry.StartTime = newWorkEntryModel.StartTime;
-    //  workEntry.EndTime = newWorkEntryModel.EndTime;
-    //  workEntry.Description = newWorkEntryModel.Description;
-    //}
   }
 }

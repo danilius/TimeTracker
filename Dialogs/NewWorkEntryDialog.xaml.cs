@@ -169,12 +169,14 @@ namespace TimeTracker.Dialogs
 
     private void ApplyClientBillingDefaults(Client client)
     {
-      HourlyRateTextBox.Text = client.DefaultHourlyRate.ToString("0.##");
+      TTAppSettings settings = TTAppSettings.Instance;
 
-      if (!string.IsNullOrWhiteSpace(client.DefaultCurrency))
-      {
-        CurrencyComboBox.Text = client.DefaultCurrency;
-      }
+      decimal rate = client.DefaultHourlyRate > 0 ? client.DefaultHourlyRate : settings.DefaultHourlyRate;
+      HourlyRateTextBox.Text = rate.ToString("0.##");
+
+      CurrencyComboBox.Text = string.IsNullOrWhiteSpace(client.DefaultCurrency)
+        ? settings.DefaultCurrency
+        : client.DefaultCurrency;
     }
 
     private void RateUpButton_Click(object sender, RoutedEventArgs e)

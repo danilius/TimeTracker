@@ -1708,11 +1708,16 @@ namespace TimeTracker
 
     private void StartProjectFromJobs(Project project)
     {
+      decimal clientRate = project.Client?.DefaultHourlyRate ?? 0m;
+      decimal rate = project.Rate > 0
+        ? Convert.ToDecimal(project.Rate)
+        : (clientRate > 0 ? clientRate : TTAppSettings.Instance.DefaultHourlyRate);
+
       WorkEntry workEntry = timeTracker.CreateWorkEntry(
         project,
         DateTime.Now,
         project.Description,
-        Convert.ToDecimal(project.Rate > 0 ? project.Rate : project.Client?.DefaultHourlyRate ?? TTAppSettings.Instance.DefaultHourlyRate),
+        rate,
         string.IsNullOrWhiteSpace(project.Client?.DefaultCurrency) ? TTAppSettings.Instance.DefaultCurrency : project.Client.DefaultCurrency);
       timeTracker.StartWork(workEntry);
       ShowHome();

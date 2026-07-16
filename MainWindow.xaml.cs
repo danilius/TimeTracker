@@ -45,6 +45,15 @@ namespace TimeTracker
     private readonly HashSet<string> autoSizedPages = new();
     private bool shouldRestoreMaximizedWindow;
     private bool isRestoringWindowState;
+    private bool isCompactJobsMode;
+    private bool isRestoringFromCompactJobsMode;
+    private bool shouldRestoreMaximizedWindowBeforeCompact;
+    private Rect normalWindowBoundsBeforeCompact;
+    private WindowState normalWindowStateBeforeCompact;
+    private ResizeMode normalResizeModeBeforeCompact;
+    private bool normalTopmostBeforeCompact;
+    private double normalMinWidthBeforeCompact;
+    private double normalMinHeightBeforeCompact;
     private readonly System.Windows.Threading.DispatcherTimer jobsPageTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     private TextBlock? jobsActiveTimerTextBlock;
     private static readonly Brush AccentBrush = BrushFromHex("#0090EE");
@@ -106,6 +115,12 @@ namespace TimeTracker
     private void TimeTracker_RunningWorkChanged(object? sender, EventArgs e)
     {
       UpdateStartStopButton();
+      if (isCompactJobsMode)
+      {
+        Content = CreateCompactJobsMonitorContent();
+        return;
+      }
+
       UpdateJobsTimerText();
     }
 
@@ -297,7 +312,7 @@ namespace TimeTracker
 
     private void RestoreMaximizedWindowState()
     {
-      if (!shouldRestoreMaximizedWindow || WindowState == WindowState.Maximized)
+      if (isCompactJobsMode || !shouldRestoreMaximizedWindow || WindowState == WindowState.Maximized)
       {
         return;
       }
@@ -310,6 +325,18 @@ namespace TimeTracker
     private void SaveWindowState()
     {
       TTAppSettings settings = TTAppSettings.Instance;
+
+      if (isCompactJobsMode)
+      {
+        settings.IsWindowMaximized = normalWindowStateBeforeCompact == WindowState.Maximized;
+        settings.WindowLeft = normalWindowBoundsBeforeCompact.Left;
+        settings.WindowTop = normalWindowBoundsBeforeCompact.Top;
+        settings.WindowWidth = normalWindowBoundsBeforeCompact.Width;
+        settings.WindowHeight = normalWindowBoundsBeforeCompact.Height;
+        settings.IsNavCollapsed = isNavCollapsed;
+        settings.Save();
+        return;
+      }
 
       settings.IsWindowMaximized = WindowState == WindowState.Maximized;
 
@@ -334,7 +361,7 @@ namespace TimeTracker
 
     private void Window_StateChanged(object sender, EventArgs e)
     {
-      if (!isRestoringWindowState)
+      if (!isRestoringWindowState && !isRestoringFromCompactJobsMode)
       {
         SaveWindowState();
       }
@@ -1254,6 +1281,9 @@ namespace TimeTracker
       };
       toolbar.Children.Add(searchBox);
       toolbar.Children.Add(CreateJobsIconButton("\uE71C", (_, _) => { }));
+      Button compactButton = CreateJobsIconButton("\uE8A7", (_, _) => EnterCompactJobsMode());
+      compactButton.ToolTip = "Compact Jobs Monitor";
+      toolbar.Children.Add(compactButton);
 
       Button newJobButton = new()
       {
@@ -1267,6 +1297,238 @@ namespace TimeTracker
       toolbar.Children.Add(newJobButton);
 
       return toolbar;
+    }
+
+    private void EnterCompactJobsMode()
+    {
+      if (isCompactJobsMode)
+      {
+        return;
+      }
+
+      normalWindowStateBeforeCompact = WindowState;
+      normalResizeModeBeforeCompact = ResizeMode;
+      normalTopmostBeforeCompact = Topmost;
+      normalMinWidthBeforeCompact = MinWidth;
+      normalMinHeightBeforeCompact = MinHeight;
+      shouldRestoreMaximizedWindowBeforeCompact = shouldRestoreMaximizedWindow;
+      normalWindowBoundsBeforeCompact = WindowState == WindowState.Normal
+        ? new Rect(Left, Top, Width, Height)
+        : RestoreBounds;
+
+      isCompactJobsMode = true;
+      isRestoringFromCompactJobsMode = true;
+      shouldRestoreMaximizedWindow = false;
+      Title = "Time Tracker - Jobs Monitor";
+      MinWidth = 420;
+      MinHeight = 330;
+      ResizeMode = ResizeMode.NoResize;
+      Topmost = true;
+
+      if (WindowState != WindowState.Normal)
+      {
+        WindowState = WindowState.Normal;
+      }
+
+      Dispatcher.BeginInvoke(ApplyCompactJobsModeWindow, DispatcherPriority.ApplicationIdle);
+
+      SaveCurrentPage(JobsPage);
+      jobsPageTimer.Start();
+    }
+
+    private void ApplyCompactJobsModeWindow()
+    {
+      if (!isCompactJobsMode)
+      {
+        return;
+      }
+
+      const double compactWidth = 420;
+      const double compactHeight = 330;
+      WindowState = WindowState.Normal;
+      Width = compactWidth;
+      Height = compactHeight;
+      Left = normalWindowBoundsBeforeCompact.Right - compactWidth;
+      Top = normalWindowBoundsBeforeCompact.Top;
+      Content = CreateCompactJobsMonitorContent();
+      Dispatcher.BeginInvoke(EnsureCompactJobsModeWindow, DispatcherPriority.ContextIdle);
+    }
+
+    private void EnsureCompactJobsModeWindow()
+    {
+      if (!isCompactJobsMode)
+      {
+        return;
+      }
+
+      const double compactWidth = 420;
+      const double compactHeight = 330;
+      WindowState = WindowState.Normal;
+      Width = compactWidth;
+      Height = compactHeight;
+      Left = normalWindowBoundsBeforeCompact.Right - compactWidth;
+      Top = normalWindowBoundsBeforeCompact.Top;
+      isRestoringFromCompactJobsMode = false;
+    }
+
+    private void ExitCompactJobsMode()
+    {
+      if (!isCompactJobsMode)
+      {
+        return;
+      }
+
+      isRestoringFromCompactJobsMode = true;
+      Content = MainGrid;
+      Title = "Time Tracker";
+      shouldRestoreMaximizedWindow = shouldRestoreMaximizedWindowBeforeCompact;
+      MinWidth = normalMinWidthBeforeCompact;
+      MinHeight = normalMinHeightBeforeCompact;
+      ResizeMode = normalResizeModeBeforeCompact;
+      Topmost = normalTopmostBeforeCompact;
+      WindowState = WindowState.Normal;
+      Left = normalWindowBoundsBeforeCompact.Left;
+      Top = normalWindowBoundsBeforeCompact.Top;
+      Width = normalWindowBoundsBeforeCompact.Width;
+      Height = normalWindowBoundsBeforeCompact.Height;
+
+      if (normalWindowStateBeforeCompact == WindowState.Maximized)
+      {
+        WindowState = WindowState.Maximized;
+      }
+
+      isCompactJobsMode = false;
+      isRestoringFromCompactJobsMode = false;
+      ShowHome();
+      SaveWindowState();
+    }
+
+    private Grid CreateCompactJobsMonitorContent()
+    {
+      WorkEntry? currentWorkEntry = timeTracker.CurrentWorkEntry;
+
+      Grid page = new()
+      {
+        Background = BrushFromHex("#F3F5F7"),
+        Margin = new Thickness(0)
+      };
+
+      Border panel = new()
+      {
+        Background = Brushes.White,
+        BorderBrush = PanelBorderBrush,
+        BorderThickness = new Thickness(1),
+        CornerRadius = new CornerRadius(8),
+        Padding = new Thickness(18),
+        Margin = new Thickness(14)
+      };
+      page.Children.Add(panel);
+
+      Grid content = new();
+      content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+      content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+      content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+      content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+      content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+      panel.Child = content;
+
+      TextBlock status = CreateStatusTitle("Active timer", timeTracker.HasRunningWork ? SuccessBrush : SecondaryTextBrush);
+      status.FontSize = 15;
+      content.Children.Add(status);
+
+      jobsActiveTimerTextBlock = new TextBlock
+      {
+        Text = currentWorkEntry == null ? "00:00:00" : FormatDurationClock(currentWorkEntry.Duration),
+        FontSize = 42,
+        FontWeight = FontWeights.SemiBold,
+        Foreground = PrimaryTextBrush,
+        Margin = new Thickness(0, 14, 0, 12)
+      };
+      Grid.SetRow(jobsActiveTimerTextBlock, 1);
+      content.Children.Add(jobsActiveTimerTextBlock);
+
+      StackPanel jobText = new();
+      jobText.Children.Add(new TextBlock
+      {
+        Text = currentWorkEntry?.ClientName ?? "No active timer",
+        FontSize = 16,
+        FontWeight = FontWeights.SemiBold,
+        Foreground = PrimaryTextBrush,
+        TextTrimming = TextTrimming.CharacterEllipsis
+      });
+      jobText.Children.Add(new TextBlock
+      {
+        Text = currentWorkEntry?.ProjectName ?? "Start a job from the full Jobs page.",
+        Foreground = PrimaryTextBrush,
+        Margin = new Thickness(0, 4, 0, 0),
+        TextTrimming = TextTrimming.CharacterEllipsis
+      });
+      jobText.Children.Add(new TextBlock
+      {
+        Text = currentWorkEntry?.Description ?? string.Empty,
+        Foreground = SecondaryTextBrush,
+        Margin = new Thickness(0, 4, 0, 0),
+        TextTrimming = TextTrimming.CharacterEllipsis
+      });
+      Grid.SetRow(jobText, 2);
+      content.Children.Add(jobText);
+
+      Grid actions = new()
+      {
+        Margin = new Thickness(0, 16, 0, 0)
+      };
+      actions.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+      actions.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+      actions.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+      actions.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+      Button stopButton = CreatePanelActionButton("Stop", true, (_, _) =>
+      {
+        timeTracker.StopWork();
+        Content = CreateCompactJobsMonitorContent();
+      }, "DangerButtonStyle", timeTracker.HasRunningWork);
+      stopButton.Margin = new Thickness(0, 0, 10, 0);
+      actions.Children.Add(stopButton);
+
+      Button restoreButton = CreatePanelActionButton("Restore", false, (_, _) => ExitCompactJobsMode());
+      restoreButton.Content = CreateIconTextContent("\uE73F", "Restore");
+      Grid.SetColumn(restoreButton, 1);
+      actions.Children.Add(restoreButton);
+
+      Button pinButton = new()
+      {
+        Content = "\uE718",
+        ToolTip = Topmost ? "Always on top is on" : "Always on top is off",
+        Width = 34,
+        Height = 34,
+        MinWidth = 34,
+        Padding = new Thickness(0),
+        Margin = new Thickness(0),
+        FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),
+        FontSize = 14
+      };
+      ApplyStyle(pinButton, "IconButtonStyle");
+      ApplyCompactPinButtonState(pinButton);
+      pinButton.Click += (_, _) =>
+      {
+        Topmost = !Topmost;
+        ApplyCompactPinButtonState(pinButton);
+      };
+      Grid.SetColumn(pinButton, 3);
+      actions.Children.Add(pinButton);
+
+      Grid.SetRow(actions, 4);
+      content.Children.Add(actions);
+      return page;
+    }
+
+    private void ApplyCompactPinButtonState(Button pinButton)
+    {
+      bool isPinned = Topmost;
+      pinButton.ToolTip = isPinned ? "Always on top is on" : "Always on top is off";
+      pinButton.Background = isPinned ? BrushFromHex("#EAF4FF") : Brushes.White;
+      pinButton.BorderBrush = isPinned ? BrushFromHex("#8EC7F7") : PanelBorderBrush;
+      pinButton.Foreground = isPinned ? AccentBrush : SecondaryTextBrush;
     }
 
     private Border CreateActiveTimerPanel()
@@ -1589,7 +1851,7 @@ namespace TimeTracker
 
     private static Border CreateStatusBadge(string text, int column, bool isRunning)
     {
-      Brush statusBrush = isRunning ? SuccessBrush : text == "Ready" ? AccentBrush : SecondaryTextBrush;
+      Brush statusBrush = isRunning || text == "Active" ? SuccessBrush : text == "Ready" ? AccentBrush : SecondaryTextBrush;
       Border badge = new()
       {
         Background = WithOpacity(statusBrush, 0.12),
@@ -1657,6 +1919,205 @@ namespace TimeTracker
       ApplyStyle(button, "FlatIconButtonStyle");
       button.Click += handler;
       return button;
+    }
+
+    private static Grid CreateModernTableGrid(params double[] columnWeights)
+    {
+      Grid grid = new();
+      foreach (double columnWeight in columnWeights)
+      {
+        GridLength width = columnWeight > 10
+          ? new GridLength(columnWeight)
+          : new GridLength(columnWeight, GridUnitType.Star);
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = width });
+      }
+
+      return grid;
+    }
+
+    private static UIElement CreateSelectionCell<T>(T item, HashSet<T> selectedItems, Panel row) where T : notnull
+    {
+      CheckBox selectBox = new()
+      {
+        HorizontalAlignment = HorizontalAlignment.Center,
+        VerticalAlignment = VerticalAlignment.Center,
+        IsChecked = selectedItems.Contains(item)
+      };
+
+      void UpdateSelection()
+      {
+        row.Background = selectedItems.Contains(item) ? BrushFromHex("#F4FAFF") : Brushes.White;
+      }
+
+      selectBox.Checked += (_, _) =>
+      {
+        selectedItems.Add(item);
+        UpdateSelection();
+      };
+      selectBox.Unchecked += (_, _) =>
+      {
+        selectedItems.Remove(item);
+        UpdateSelection();
+      };
+      UpdateSelection();
+      Grid.SetColumn(selectBox, 0);
+      return selectBox;
+    }
+
+    private static UIElement CreateModernStackCell(string primaryText, string secondaryText, int column)
+    {
+      StackPanel cell = new()
+      {
+        Margin = new Thickness(16, 8, 8, 8),
+        VerticalAlignment = VerticalAlignment.Center
+      };
+
+      cell.Children.Add(new TextBlock
+      {
+        Text = primaryText,
+        Foreground = PrimaryTextBrush,
+        FontWeight = FontWeights.SemiBold,
+        TextTrimming = TextTrimming.CharacterEllipsis
+      });
+
+      if (!string.IsNullOrWhiteSpace(secondaryText))
+      {
+        cell.Children.Add(new TextBlock
+        {
+          Text = secondaryText,
+          Foreground = SecondaryTextBrush,
+          Margin = new Thickness(0, 3, 0, 0),
+          TextTrimming = TextTrimming.CharacterEllipsis
+        });
+      }
+
+      Grid.SetColumn(cell, column);
+      return cell;
+    }
+
+    private static UIElement CreateAvatarTextCell(string primaryText, string secondaryText, int column)
+    {
+      DockPanel cell = new()
+      {
+        Margin = new Thickness(16, 10, 8, 10),
+        VerticalAlignment = VerticalAlignment.Center
+      };
+      Border avatar = new()
+      {
+        Width = 26,
+        Height = 26,
+        Background = GetClientBrush(primaryText),
+        CornerRadius = new CornerRadius(4),
+        Margin = new Thickness(0, 0, 10, 0),
+        Child = new TextBlock
+        {
+          Text = GetInitial(primaryText),
+          Foreground = Brushes.White,
+          FontWeight = FontWeights.SemiBold,
+          HorizontalAlignment = HorizontalAlignment.Center,
+          VerticalAlignment = VerticalAlignment.Center
+        }
+      };
+      DockPanel.SetDock(avatar, Dock.Left);
+      cell.Children.Add(avatar);
+
+      StackPanel text = new()
+      {
+        VerticalAlignment = VerticalAlignment.Center
+      };
+      text.Children.Add(new TextBlock
+      {
+        Text = primaryText,
+        Foreground = PrimaryTextBrush,
+        FontWeight = FontWeights.SemiBold,
+        TextTrimming = TextTrimming.CharacterEllipsis
+      });
+      if (!string.IsNullOrWhiteSpace(secondaryText))
+      {
+        text.Children.Add(new TextBlock
+        {
+          Text = secondaryText,
+          Foreground = SecondaryTextBrush,
+          Margin = new Thickness(0, 3, 0, 0),
+          TextTrimming = TextTrimming.CharacterEllipsis
+        });
+      }
+      cell.Children.Add(text);
+
+      Grid.SetColumn(cell, column);
+      return cell;
+    }
+
+    private static UIElement CreateModernActionsCell(int column, params (string Icon, RoutedEventHandler Handler)[] actions)
+    {
+      StackPanel actionPanel = new()
+      {
+        Orientation = Orientation.Horizontal,
+        HorizontalAlignment = HorizontalAlignment.Left,
+        VerticalAlignment = VerticalAlignment.Center,
+        Margin = new Thickness(12, 0, 0, 0)
+      };
+
+      foreach ((string icon, RoutedEventHandler handler) in actions)
+      {
+        actionPanel.Children.Add(CreateSmallActionButton(icon, handler));
+      }
+
+      Grid.SetColumn(actionPanel, column);
+      return actionPanel;
+    }
+
+    private static void AddModernRowSeparator(Grid row, int columnSpan)
+    {
+      Border separator = new()
+      {
+        Height = 1,
+        Background = BrushFromHex("#E7ECF1"),
+        VerticalAlignment = VerticalAlignment.Bottom
+      };
+      Grid.SetColumnSpan(separator, columnSpan);
+      row.Children.Add(separator);
+    }
+
+    private static ScrollViewer CreateModernTableScroll(UIElement table)
+    {
+      return new ScrollViewer
+      {
+        Content = table,
+        VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+        HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
+      };
+    }
+
+    private static string FormatMoney(decimal total, string currency)
+    {
+      return string.IsNullOrWhiteSpace(currency)
+        ? total.ToString("0.00", CultureInfo.CurrentCulture)
+        : $"{currency}{total:0.00}";
+    }
+
+    private static StackPanel CreateIconTextContent(string icon, string text)
+    {
+      StackPanel content = new()
+      {
+        Orientation = Orientation.Horizontal,
+        HorizontalAlignment = HorizontalAlignment.Center,
+        VerticalAlignment = VerticalAlignment.Center
+      };
+      content.Children.Add(new TextBlock
+      {
+        Text = icon,
+        FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),
+        FontSize = 13,
+        Margin = new Thickness(0, 0, 6, 0),
+        VerticalAlignment = VerticalAlignment.Center
+      });
+      content.Children.Add(new TextBlock
+      {
+        Text = text,
+        VerticalAlignment = VerticalAlignment.Center
+      });
+      return content;
     }
 
     private Button CreatePanelActionButton(string text, bool isPrimary, RoutedEventHandler handler, string? styleKey = null, bool isEnabled = true)
@@ -1728,7 +2189,7 @@ namespace TimeTracker
 
     private void NewJobFromJobs(bool startNow)
     {
-      NewWorkEntryDialog dialog = new()
+      NewWorkEntryDialog dialog = new(NewWorkEntryDialog.DialogMode.JobTimer)
       {
         Owner = this,
         WindowStartupLocation = WindowStartupLocation.CenterOwner
@@ -1757,19 +2218,31 @@ namespace TimeTracker
 
     private void StartProjectFromJobs(Project project)
     {
-      decimal clientRate = project.Client?.DefaultHourlyRate ?? 0m;
-      decimal rate = project.Rate > 0
-        ? Convert.ToDecimal(project.Rate)
-        : (clientRate > 0 ? clientRate : TTAppSettings.Instance.DefaultHourlyRate);
+      NewWorkEntryDialog dialog = new(project)
+      {
+        Owner = this,
+        WindowStartupLocation = WindowStartupLocation.CenterOwner
+      };
 
-      WorkEntry workEntry = timeTracker.CreateWorkEntry(
-        project,
-        DateTime.Now,
-        project.Description,
-        rate,
-        string.IsNullOrWhiteSpace(project.Client?.DefaultCurrency) ? TTAppSettings.Instance.DefaultCurrency : project.Client.DefaultCurrency);
-      timeTracker.StartWork(workEntry);
-      ShowHome();
+      if (dialog.ShowDialog() == true)
+      {
+        WorkEntry workEntry = timeTracker.CreateWorkEntry(
+          dialog.ClientName,
+          dialog.ProjectName,
+          dialog.StartTime,
+          dialog.Description,
+          dialog.HourlyRate,
+          dialog.Currency,
+          dialog.Duration,
+          dialog.IsBillable);
+
+        if (dialog.StartTimerNow)
+        {
+          timeTracker.StartWork(workEntry);
+        }
+
+        ShowHome();
+      }
     }
 
     private static string FormatDurationClock(TimeSpan duration)
@@ -1799,42 +2272,31 @@ namespace TimeTracker
       HeaderCenterContent.Content = null;
       SaveCurrentPage(ClientsPage);
 
-      DataGrid grid = CreateReadOnlyGrid();
-      grid.ItemsSource = timeTracker.ActiveClients;
-      grid.MouseDoubleClick += (_, _) =>
-      {
-        if (grid.SelectedItem is Client client)
-        {
-          EditClient(client);
-        }
-      };
-      grid.Columns.Add(new DataGridTextColumn { Header = "Client", Binding = new Binding("Name") });
-      grid.Columns.Add(new DataGridTextColumn { Header = "Company", Binding = new Binding("CompanyName") });
-      grid.Columns.Add(new DataGridTextColumn { Header = "Email", Binding = new Binding("Email") });
-      grid.Columns.Add(new DataGridTextColumn { Header = "Phone", Binding = new Binding("Phone") });
-      grid.Columns.Add(new DataGridTextColumn { Header = "Address", Binding = new Binding("Address") });
-      grid.Columns.Add(new DataGridTextColumn { Header = "Default rate", Binding = new Binding("DefaultHourlyRate") { StringFormat = "0.##" } });
-      grid.Columns.Add(new DataGridTextColumn { Header = "Default currency", Binding = new Binding("DefaultCurrency") });
-      grid.Columns.Add(new DataGridTextColumn { Header = "Invoice prefix", Binding = new Binding("InvoiceNumberPrefix") });
-      grid.Columns.Add(new DataGridTextColumn { Header = "Current invoice number", Binding = new Binding("CurrentInvoiceNumber") });
-      grid.Columns.Add(new DataGridTextColumn { Header = "Projects", Binding = new Binding("Projects.Count") });
-      AutoSizeGridColumnsOnFirstPageOpen(ClientsPage, grid);
+      List<Client> clients = timeTracker.ActiveClients
+        .OrderBy(client => client.Name)
+        .ToList();
+      HashSet<Client> selectedClients = new();
+      StackPanel table = CreateClientsTable(clients, selectedClients);
 
       ShowMainContent(CreateListPage(
         CreateToolbarButton("New Client", (_, _) => NewClient()),
         CreateToolbarButton("Edit", (_, _) =>
         {
-          if (grid.SelectedItem is Client client)
+          if (selectedClients.Count == 1)
           {
-            EditClient(client);
+            EditClient(selectedClients.First());
+          }
+          else if (selectedClients.Count > 1)
+          {
+            MessageBox.Show(this, "Select one client to edit.", "Clients", MessageBoxButton.OK, MessageBoxImage.Information);
           }
         }),
         CreateToolbarButton("Delete", (_, _) =>
         {
-          List<Client> clients = GetSelectedItems<Client>(grid);
-          if (clients.Count > 0)
+          List<Client> clientsToArchive = selectedClients.ToList();
+          if (clientsToArchive.Count > 0)
           {
-            foreach (Client client in clients)
+            foreach (Client client in clientsToArchive)
             {
               timeTracker.ArchiveClient(client);
             }
@@ -1842,7 +2304,7 @@ namespace TimeTracker
             ShowClients();
           }
         }),
-        grid));
+        CreateModernTableScroll(table)));
     }
 
     private void ShowProjects()
@@ -1854,36 +2316,32 @@ namespace TimeTracker
       HeaderCenterContent.Content = null;
       SaveCurrentPage(ProjectsPage);
 
-      DataGrid grid = CreateReadOnlyGrid();
-      grid.ItemsSource = timeTracker.Projects;
-      grid.MouseDoubleClick += (_, _) =>
-      {
-        if (grid.SelectedItem is Project project)
-        {
-          EditProject(project);
-        }
-      };
-      grid.Columns.Add(new DataGridTextColumn { Header = "Project", Binding = new Binding("Name") });
-      grid.Columns.Add(new DataGridTextColumn { Header = "Client", Binding = new Binding("Client.Name") });
-      grid.Columns.Add(new DataGridTextColumn { Header = "Description", Binding = new Binding("Description") });
-      grid.Columns.Add(new DataGridTextColumn { Header = "Rate", Binding = new Binding("Rate") });
-      AutoSizeGridColumnsOnFirstPageOpen(ProjectsPage, grid);
+      List<Project> projects = timeTracker.Projects
+        .OrderBy(project => project.Client?.Name)
+        .ThenBy(project => project.Name)
+        .ToList();
+      HashSet<Project> selectedProjects = new();
+      StackPanel table = CreateProjectsTable(projects, selectedProjects);
 
       ShowMainContent(CreateListPage(
         CreateToolbarButton("New Project", (_, _) => NewProject()),
         CreateToolbarButton("Edit", (_, _) =>
         {
-          if (grid.SelectedItem is Project project)
+          if (selectedProjects.Count == 1)
           {
-            EditProject(project);
+            EditProject(selectedProjects.First());
+          }
+          else if (selectedProjects.Count > 1)
+          {
+            MessageBox.Show(this, "Select one project to edit.", "Projects", MessageBoxButton.OK, MessageBoxImage.Information);
           }
         }),
         CreateToolbarButton("Delete", (_, _) =>
         {
-          List<Project> projects = GetSelectedItems<Project>(grid);
-          if (projects.Count > 0)
+          List<Project> projectsToArchive = selectedProjects.ToList();
+          if (projectsToArchive.Count > 0)
           {
-            foreach (Project project in projects)
+            foreach (Project project in projectsToArchive)
             {
               timeTracker.ArchiveProject(project);
             }
@@ -1891,7 +2349,7 @@ namespace TimeTracker
             ShowProjects();
           }
         }),
-        grid));
+        CreateModernTableScroll(table)));
     }
 
     private void ShowTimesheets()
@@ -1903,86 +2361,29 @@ namespace TimeTracker
       HeaderCenterContent.Content = null;
       SaveCurrentPage(TimesheetsPage);
 
-      CollectionViewSource timesheets = new()
-      {
-        Source = timeTracker.WorkEntries
-      };
-      timesheets.SortDescriptions.Add(new SortDescription(nameof(WorkEntry.StartTime), ListSortDirection.Descending));
-
-      DataGrid grid = CreateReadOnlyGrid();
-      grid.IsReadOnly = false;
-      grid.ItemsSource = timesheets.View;
-      grid.Sorting += TimesheetsGrid_Sorting;
-      grid.RowEditEnding += TimesheetsGrid_RowEditEnding;
-      grid.MouseDoubleClick += (_, _) =>
-      {
-        if (grid.SelectedItem is WorkEntry workEntry)
-        {
-          EditWorkEntry(workEntry);
-          ShowTimesheets();
-        }
-      };
-      grid.RowStyle = CreateTimesheetRowStyle();
-
-      grid.Columns.Add(new DataGridTextColumn
-      {
-        Header = "Time",
-        Binding = CreateDateTimeBinding("StartTime"),
-        SortMemberPath = nameof(WorkEntry.StartTime),
-        SortDirection = ListSortDirection.Descending,
-        IsReadOnly = true
-      });
-      grid.Columns.Add(new DataGridTextColumn
-      {
-        Header = "Client",
-        Binding = new Binding(nameof(WorkEntry.ClientName)),
-        SortMemberPath = nameof(WorkEntry.ClientName),
-        IsReadOnly = true
-      });
-      grid.Columns.Add(new DataGridTextColumn
-      {
-        Header = "Project",
-        Binding = new Binding(nameof(WorkEntry.ProjectName)),
-        SortMemberPath = nameof(WorkEntry.ProjectName),
-        IsReadOnly = true
-      });
-      grid.Columns.Add(new DataGridTextColumn
-      {
-        Header = "Description",
-        Binding = new Binding("Description"),
-        IsReadOnly = true
-      });
-      grid.Columns.Add(new DataGridTextColumn
-      {
-        Header = "Rate",
-        Binding = new Binding("HourlyRate") { StringFormat = "0.##" }
-      });
-      grid.Columns.Add(new DataGridTextColumn
-      {
-        Header = "Currency",
-        Binding = new Binding("Currency")
-      });
-      grid.Columns.Add(new DataGridTextColumn
-      {
-        Header = "Duration",
-        Binding = new Binding("Duration") { StringFormat = @"hh\:mm" },
-        IsReadOnly = true
-      });
-      AutoSizeGridColumnsOnFirstPageOpen(TimesheetsPage, grid);
+      List<WorkEntry> entries = timeTracker.WorkEntries
+        .OrderByDescending(workEntry => workEntry.StartTime)
+        .ToList();
+      HashSet<WorkEntry> selectedEntries = new();
+      StackPanel table = CreateTimesheetsTable(entries, selectedEntries);
 
       ShowMainContent(CreateListPage(
         CreateToolbarButton("New Entry", (_, _) => NewManualWorkEntry()),
         CreateToolbarButton("Edit", (_, _) =>
         {
-          if (grid.SelectedItem is WorkEntry workEntry)
+          if (selectedEntries.Count == 1)
           {
-            EditWorkEntry(workEntry);
+            EditWorkEntry(selectedEntries.First());
             ShowTimesheets();
+          }
+          else if (selectedEntries.Count > 1)
+          {
+            MessageBox.Show(this, "Select one entry to edit.", "Time sheets", MessageBoxButton.OK, MessageBoxImage.Information);
           }
         }),
         CreateToolbarButton("Delete", (_, _) =>
         {
-          List<WorkEntry> workEntries = GetSelectedItems<WorkEntry>(grid);
+          List<WorkEntry> workEntries = selectedEntries.ToList();
           if (workEntries.Count > 0)
           {
             foreach (WorkEntry workEntry in workEntries)
@@ -1993,7 +2394,434 @@ namespace TimeTracker
             ShowTimesheets();
           }
         }),
-        grid));
+        new ScrollViewer
+        {
+          Content = table,
+          VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+          HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
+        }));
+    }
+
+    private StackPanel CreateTimesheetsTable(List<WorkEntry> entries, HashSet<WorkEntry> selectedEntries)
+    {
+      StackPanel table = new();
+      table.Children.Add(CreateTimesheetsTableHeader());
+
+      if (entries.Count == 0)
+      {
+        table.Children.Add(CreateEmptyText("No time sheet entries yet."));
+        return table;
+      }
+
+      foreach (WorkEntry entry in entries)
+      {
+        table.Children.Add(CreateTimesheetTableRow(entry, selectedEntries));
+      }
+
+      return table;
+    }
+
+    private static UIElement CreateTimesheetsTableHeader()
+    {
+      Grid header = CreateTimesheetsTableGrid();
+      header.Background = BrushFromHex("#F8FAFC");
+
+      TextBlock selectorHeader = new()
+      {
+        HorizontalAlignment = HorizontalAlignment.Center,
+        VerticalAlignment = VerticalAlignment.Center
+      };
+      Grid.SetColumn(selectorHeader, 0);
+      header.Children.Add(selectorHeader);
+
+      header.Children.Add(CreateJobsHeaderCell("Client", 1));
+      header.Children.Add(CreateJobsHeaderCell("Project", 2));
+      header.Children.Add(CreateJobsHeaderCell("Start", 3));
+      header.Children.Add(CreateJobsHeaderCell("Duration", 4));
+      header.Children.Add(CreateJobsHeaderCell("Rate", 5));
+      header.Children.Add(CreateJobsHeaderCell("Billable", 6));
+      header.Children.Add(CreateJobsHeaderCell("Actions", 7));
+      return header;
+    }
+
+    private UIElement CreateTimesheetTableRow(WorkEntry entry, HashSet<WorkEntry> selectedEntries)
+    {
+      Grid row = CreateTimesheetsTableGrid();
+      row.MinHeight = 58;
+      row.Background = entry.IsRunning ? WithOpacity(SuccessBrush, 0.08) : Brushes.White;
+      row.MouseLeftButtonDown += (_, e) =>
+      {
+        if (e.ClickCount == 2)
+        {
+          EditWorkEntry(entry);
+          ShowTimesheets();
+        }
+      };
+
+      CheckBox selectBox = new()
+      {
+        HorizontalAlignment = HorizontalAlignment.Center,
+        VerticalAlignment = VerticalAlignment.Center,
+        IsChecked = selectedEntries.Contains(entry)
+      };
+      selectBox.Checked += (_, _) => selectedEntries.Add(entry);
+      selectBox.Unchecked += (_, _) => selectedEntries.Remove(entry);
+      Grid.SetColumn(selectBox, 0);
+      row.Children.Add(selectBox);
+
+      row.Children.Add(CreateClientCell(entry));
+      Grid.SetColumn(row.Children[^1], 1);
+      row.Children.Add(CreateTimesheetProjectCell(entry));
+      row.Children.Add(CreateJobsTextCell(entry.StartTime.ToString("dd/MM/yyyy " + TTAppSettings.Instance.ShortTimePattern, CultureInfo.CurrentCulture), 3, false));
+      row.Children.Add(CreateJobsTextCell(FormatDurationShort(entry.Duration), 4, true));
+      row.Children.Add(CreateJobsTextCell($"{entry.Currency}{entry.HourlyRate:0.##}/hr", 5, false));
+      row.Children.Add(CreateTimesheetBadge(entry, 6));
+      row.Children.Add(CreateTimesheetActionsCell(entry));
+      row.Children.Add(new Border
+      {
+        Height = 1,
+        Background = BrushFromHex("#E7ECF1"),
+        VerticalAlignment = VerticalAlignment.Bottom
+      });
+      Grid.SetColumnSpan(row.Children[^1], 8);
+      return row;
+    }
+
+    private static Grid CreateTimesheetsTableGrid()
+    {
+      Grid grid = new();
+      grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(44) });
+      grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.25, GridUnitType.Star) });
+      grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.55, GridUnitType.Star) });
+      grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.2, GridUnitType.Star) });
+      grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.8, GridUnitType.Star) });
+      grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.8, GridUnitType.Star) });
+      grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.9, GridUnitType.Star) });
+      grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.85, GridUnitType.Star) });
+      return grid;
+    }
+
+    private static UIElement CreateTimesheetProjectCell(WorkEntry entry)
+    {
+      StackPanel cell = new()
+      {
+        Margin = new Thickness(16, 8, 8, 8),
+        VerticalAlignment = VerticalAlignment.Center
+      };
+      cell.Children.Add(new TextBlock
+      {
+        Text = entry.ProjectName,
+        Foreground = PrimaryTextBrush,
+        FontWeight = FontWeights.SemiBold,
+        TextTrimming = TextTrimming.CharacterEllipsis
+      });
+      if (!string.IsNullOrWhiteSpace(entry.Description))
+      {
+        cell.Children.Add(new TextBlock
+        {
+          Text = entry.Description,
+          Foreground = SecondaryTextBrush,
+          Margin = new Thickness(0, 3, 0, 0),
+          TextTrimming = TextTrimming.CharacterEllipsis
+        });
+      }
+      Grid.SetColumn(cell, 2);
+      return cell;
+    }
+
+    private static Border CreateTimesheetBadge(WorkEntry entry, int column)
+    {
+      string text = entry.IsRunning ? "Running" : entry.IsBillable ? "Billable" : "Non-billable";
+      Brush statusBrush = entry.IsRunning ? SuccessBrush : entry.IsBillable ? AccentBrush : SecondaryTextBrush;
+      Border badge = new()
+      {
+        Background = WithOpacity(statusBrush, 0.12),
+        BorderBrush = WithOpacity(statusBrush, 0.45),
+        BorderThickness = new Thickness(1),
+        CornerRadius = new CornerRadius(5),
+        Padding = new Thickness(10, 3, 10, 4),
+        HorizontalAlignment = HorizontalAlignment.Left,
+        VerticalAlignment = VerticalAlignment.Center,
+        Margin = new Thickness(16, 0, 8, 0),
+        Child = new TextBlock
+        {
+          Text = text,
+          Foreground = statusBrush,
+          FontWeight = FontWeights.SemiBold,
+          FontSize = 12
+        }
+      };
+      Grid.SetColumn(badge, column);
+      return badge;
+    }
+
+    private UIElement CreateTimesheetActionsCell(WorkEntry entry)
+    {
+      StackPanel actions = new()
+      {
+        Orientation = Orientation.Horizontal,
+        HorizontalAlignment = HorizontalAlignment.Left,
+        VerticalAlignment = VerticalAlignment.Center,
+        Margin = new Thickness(12, 0, 0, 0)
+      };
+      actions.Children.Add(CreateSmallActionButton("\uE70F", (_, _) =>
+      {
+        EditWorkEntry(entry);
+        ShowTimesheets();
+      }));
+      actions.Children.Add(CreateSmallActionButton("\uE74D", (_, _) =>
+      {
+        timeTracker.DeleteWorkEntry(entry);
+        ShowTimesheets();
+      }));
+      Grid.SetColumn(actions, 7);
+      return actions;
+    }
+
+    private StackPanel CreateClientsTable(List<Client> clients, HashSet<Client> selectedClients)
+    {
+      StackPanel table = new();
+      Grid header = CreateModernTableGrid(44, 1.45, 1.45, 0.95, 0.9, 0.75, 0.8);
+      header.Background = BrushFromHex("#F8FAFC");
+      header.Children.Add(CreateJobsHeaderCell("Client", 1));
+      header.Children.Add(CreateJobsHeaderCell("Contact", 2));
+      header.Children.Add(CreateJobsHeaderCell("Rate", 3));
+      header.Children.Add(CreateJobsHeaderCell("Invoice", 4));
+      header.Children.Add(CreateJobsHeaderCell("Projects", 5));
+      header.Children.Add(CreateJobsHeaderCell("Actions", 6));
+      table.Children.Add(header);
+
+      if (clients.Count == 0)
+      {
+        table.Children.Add(CreateEmptyText("No clients yet."));
+        return table;
+      }
+
+      foreach (Client client in clients)
+      {
+        table.Children.Add(CreateClientTableRow(client, selectedClients));
+      }
+
+      return table;
+    }
+
+    private UIElement CreateClientTableRow(Client client, HashSet<Client> selectedClients)
+    {
+      Grid row = CreateModernTableGrid(44, 1.45, 1.45, 0.95, 0.9, 0.75, 0.8);
+      row.MinHeight = 62;
+      row.Background = Brushes.White;
+      row.MouseLeftButtonDown += (_, e) =>
+      {
+        if (e.ClickCount == 2)
+        {
+          EditClient(client);
+        }
+      };
+
+      row.Children.Add(CreateSelectionCell(client, selectedClients, row));
+      row.Children.Add(CreateAvatarTextCell(client.Name, client.CompanyName, 1));
+      row.Children.Add(CreateModernStackCell(
+        string.IsNullOrWhiteSpace(client.Email) ? client.Phone : client.Email,
+        string.IsNullOrWhiteSpace(client.Phone) ? client.Address : client.Phone,
+        2));
+      row.Children.Add(CreateJobsTextCell($"{client.DefaultCurrency}{client.DefaultHourlyRate:0.##}/hr", 3, true));
+      row.Children.Add(CreateModernStackCell(client.InvoiceNumberPrefix, client.CurrentInvoiceNumber.ToString(CultureInfo.CurrentCulture), 4));
+      row.Children.Add(CreateJobsTextCell(client.Projects.Count.ToString(CultureInfo.CurrentCulture), 5, true));
+      row.Children.Add(CreateModernActionsCell(6,
+        ("\uE70F", (RoutedEventHandler)((_, _) => EditClient(client))),
+        ("\uE74D", (RoutedEventHandler)((_, _) =>
+        {
+          timeTracker.ArchiveClient(client);
+          ShowClients();
+        }))));
+      AddModernRowSeparator(row, 7);
+      return row;
+    }
+
+    private StackPanel CreateProjectsTable(List<Project> projects, HashSet<Project> selectedProjects)
+    {
+      StackPanel table = new();
+      Grid header = CreateModernTableGrid(44, 1.45, 1.25, 1.65, 0.75, 0.8, 0.8);
+      header.Background = BrushFromHex("#F8FAFC");
+      header.Children.Add(CreateJobsHeaderCell("Project", 1));
+      header.Children.Add(CreateJobsHeaderCell("Client", 2));
+      header.Children.Add(CreateJobsHeaderCell("Description", 3));
+      header.Children.Add(CreateJobsHeaderCell("Rate", 4));
+      header.Children.Add(CreateJobsHeaderCell("Status", 5));
+      header.Children.Add(CreateJobsHeaderCell("Actions", 6));
+      table.Children.Add(header);
+
+      if (projects.Count == 0)
+      {
+        table.Children.Add(CreateEmptyText("No active projects yet."));
+        return table;
+      }
+
+      foreach (Project project in projects)
+      {
+        table.Children.Add(CreateProjectTableRow(project, selectedProjects));
+      }
+
+      return table;
+    }
+
+    private UIElement CreateProjectTableRow(Project project, HashSet<Project> selectedProjects)
+    {
+      Grid row = CreateModernTableGrid(44, 1.45, 1.25, 1.65, 0.75, 0.8, 0.8);
+      row.MinHeight = 62;
+      row.Background = Brushes.White;
+      row.MouseLeftButtonDown += (_, e) =>
+      {
+        if (e.ClickCount == 2)
+        {
+          EditProject(project);
+        }
+      };
+
+      string projectName = project.Name ?? string.Empty;
+      string clientName = project.Client?.Name ?? string.Empty;
+      row.Children.Add(CreateSelectionCell(project, selectedProjects, row));
+      row.Children.Add(CreateModernStackCell(projectName, clientName, 1));
+      row.Children.Add(CreateAvatarTextCell(clientName, project.Client?.CompanyName ?? string.Empty, 2));
+      row.Children.Add(CreateJobsTextCell(project.Description ?? string.Empty, 3, false));
+      row.Children.Add(CreateJobsTextCell($"{TimeTrackerModel.GetProjectHourlyRate(project):0.##}/hr", 4, true));
+      row.Children.Add(CreateStatusBadge("Active", 5, false));
+      row.Children.Add(CreateModernActionsCell(6,
+        ("\uE70F", (RoutedEventHandler)((_, _) => EditProject(project))),
+        ("\uE74D", (RoutedEventHandler)((_, _) =>
+        {
+          timeTracker.ArchiveProject(project);
+          ShowProjects();
+        }))));
+      AddModernRowSeparator(row, 7);
+      return row;
+    }
+
+    private StackPanel CreateReportsTable(List<ReportRow> rows, HashSet<ReportRow> selectedRows)
+    {
+      StackPanel table = new();
+      Grid header = CreateModernTableGrid(44, 1.5, 1.35, 1.2, 1.1, 0.65, 0.7, 0.9, 1.05);
+      header.Background = BrushFromHex("#F8FAFC");
+      header.Children.Add(CreateJobsHeaderCell("Report", 1));
+      header.Children.Add(CreateJobsHeaderCell("Range", 2));
+      header.Children.Add(CreateJobsHeaderCell("Client", 3));
+      header.Children.Add(CreateJobsHeaderCell("Project", 4));
+      header.Children.Add(CreateJobsHeaderCell("Jobs", 5));
+      header.Children.Add(CreateJobsHeaderCell("Hours", 6));
+      header.Children.Add(CreateJobsHeaderCell("Total", 7));
+      header.Children.Add(CreateJobsHeaderCell("Actions", 8));
+      table.Children.Add(header);
+
+      if (rows.Count == 0)
+      {
+        table.Children.Add(CreateEmptyText("No saved reports yet."));
+        return table;
+      }
+
+      foreach (ReportRow row in rows)
+      {
+        table.Children.Add(CreateReportTableRow(row, selectedRows));
+      }
+
+      return table;
+    }
+
+    private UIElement CreateReportTableRow(ReportRow reportRow, HashSet<ReportRow> selectedRows)
+    {
+      Grid row = CreateModernTableGrid(44, 1.5, 1.35, 1.2, 1.1, 0.65, 0.7, 0.9, 1.05);
+      row.MinHeight = 62;
+      row.Background = Brushes.White;
+      row.MouseLeftButtonDown += (_, e) =>
+      {
+        if (e.ClickCount == 2)
+        {
+          EditReport(reportRow.Report);
+        }
+      };
+
+      row.Children.Add(CreateSelectionCell(reportRow, selectedRows, row));
+      row.Children.Add(CreateModernStackCell(reportRow.Name, reportRow.Currency, 1));
+      row.Children.Add(CreateModernStackCell(FormatDate(reportRow.StartDate), FormatDate(reportRow.EndDate), 2));
+      row.Children.Add(CreateAvatarTextCell(reportRow.ClientName, string.Empty, 3));
+      row.Children.Add(CreateJobsTextCell(reportRow.ProjectName, 4, false));
+      row.Children.Add(CreateJobsTextCell(reportRow.JobCount.ToString(CultureInfo.CurrentCulture), 5, true));
+      row.Children.Add(CreateJobsTextCell($"{reportRow.Hours:0.##}h", 6, true));
+      row.Children.Add(CreateJobsTextCell(FormatMoney(reportRow.Total, reportRow.Currency), 7, true));
+      row.Children.Add(CreateModernActionsCell(8,
+        ("\uE749", (RoutedEventHandler)((_, _) => PrintReport(reportRow.Report))),
+        ("\uE8A5", (RoutedEventHandler)((_, _) => SaveReportFile(reportRow.Report))),
+        ("\uE70F", (RoutedEventHandler)((_, _) => EditReport(reportRow.Report))),
+        ("\uE74D", (RoutedEventHandler)((_, _) =>
+        {
+          timeTracker.DeleteReport(reportRow.Report);
+          ShowReports();
+        }))));
+      AddModernRowSeparator(row, 9);
+      return row;
+    }
+
+    private StackPanel CreateInvoicesTable(List<InvoiceRow> rows, HashSet<InvoiceRow> selectedRows)
+    {
+      StackPanel table = new();
+      Grid header = CreateModernTableGrid(44, 1.25, 1.3, 1.35, 0.65, 0.7, 0.9, 1.25);
+      header.Background = BrushFromHex("#F8FAFC");
+      header.Children.Add(CreateJobsHeaderCell("Invoice", 1));
+      header.Children.Add(CreateJobsHeaderCell("Client", 2));
+      header.Children.Add(CreateJobsHeaderCell("Dates", 3));
+      header.Children.Add(CreateJobsHeaderCell("Jobs", 4));
+      header.Children.Add(CreateJobsHeaderCell("Hours", 5));
+      header.Children.Add(CreateJobsHeaderCell("Total", 6));
+      header.Children.Add(CreateJobsHeaderCell("Actions", 7));
+      table.Children.Add(header);
+
+      if (rows.Count == 0)
+      {
+        table.Children.Add(CreateEmptyText("No saved invoices yet."));
+        return table;
+      }
+
+      foreach (InvoiceRow row in rows)
+      {
+        table.Children.Add(CreateInvoiceTableRow(row, selectedRows));
+      }
+
+      return table;
+    }
+
+    private UIElement CreateInvoiceTableRow(InvoiceRow invoiceRow, HashSet<InvoiceRow> selectedRows)
+    {
+      Grid row = CreateModernTableGrid(44, 1.25, 1.3, 1.35, 0.65, 0.7, 0.9, 1.25);
+      row.MinHeight = 62;
+      row.Background = Brushes.White;
+      row.MouseLeftButtonDown += (_, e) =>
+      {
+        if (e.ClickCount == 2)
+        {
+          PrintInvoice(invoiceRow.Invoice);
+        }
+      };
+
+      row.Children.Add(CreateSelectionCell(invoiceRow, selectedRows, row));
+      row.Children.Add(CreateModernStackCell(invoiceRow.InvoiceNumber, $"Issued {FormatDate(invoiceRow.IssueDate)}", 1));
+      row.Children.Add(CreateAvatarTextCell(invoiceRow.ClientName, invoiceRow.Currency, 2));
+      row.Children.Add(CreateModernStackCell(FormatDate(invoiceRow.StartDate), FormatDate(invoiceRow.EndDate), 3));
+      row.Children.Add(CreateJobsTextCell(invoiceRow.JobCount.ToString(CultureInfo.CurrentCulture), 4, true));
+      row.Children.Add(CreateJobsTextCell($"{invoiceRow.HoursTotal:0.##}h", 5, true));
+      row.Children.Add(CreateJobsTextCell(FormatMoney(invoiceRow.Total, invoiceRow.Currency), 6, true));
+      row.Children.Add(CreateModernActionsCell(7,
+        ("\uE749", (RoutedEventHandler)((_, _) => PrintInvoice(invoiceRow.Invoice))),
+        ("\uE8A5", (RoutedEventHandler)((_, _) => SaveInvoiceFile(invoiceRow.Invoice))),
+        ("\uE8EF", (RoutedEventHandler)((_, _) => ShowInvoiceJobs(invoiceRow.Invoice))),
+        ("\uE74D", (RoutedEventHandler)((_, _) =>
+        {
+          if (ConfirmDeleteInvoiceRows(new[] { invoiceRow }))
+          {
+            timeTracker.DeleteInvoice(invoiceRow.Invoice);
+            ShowInvoices();
+          }
+        }))));
+      AddModernRowSeparator(row, 8);
+      return row;
     }
 
     private void ShowReports()
@@ -2005,43 +2833,34 @@ namespace TimeTracker
       HeaderCenterContent.Content = null;
       SaveCurrentPage(ReportsPage);
 
-      DataGrid grid = CreateReadOnlyGrid();
-      grid.ItemsSource = timeTracker.Reports.Select(CreateReportRow).ToList();
-      grid.MouseDoubleClick += (_, _) =>
-      {
-        if (grid.SelectedItem is ReportRow row)
-        {
-          EditReport(row.Report);
-        }
-      };
-
-      grid.Columns.Add(new DataGridTextColumn { Header = "Report", Binding = new Binding(nameof(ReportRow.Name)) });
-      grid.Columns.Add(new DataGridTextColumn { Header = "Start", Binding = CreateDateBinding(nameof(ReportRow.StartDate)) });
-      grid.Columns.Add(new DataGridTextColumn { Header = "End", Binding = CreateDateBinding(nameof(ReportRow.EndDate)) });
-      grid.Columns.Add(new DataGridTextColumn { Header = "Client", Binding = new Binding(nameof(ReportRow.ClientName)) });
-      grid.Columns.Add(new DataGridTextColumn { Header = "Project", Binding = new Binding(nameof(ReportRow.ProjectName)) });
-      grid.Columns.Add(new DataGridTextColumn { Header = "Jobs", Binding = new Binding(nameof(ReportRow.JobCount)) });
-      grid.Columns.Add(new DataGridTextColumn { Header = "Hours", Binding = new Binding(nameof(ReportRow.Hours)) { StringFormat = "0.##" } });
-      grid.Columns.Add(new DataGridTextColumn { Header = "Total", Binding = new Binding(nameof(ReportRow.Total)) { StringFormat = "0.00" } });
-      grid.Columns.Add(new DataGridTextColumn { Header = "Currency", Binding = new Binding(nameof(ReportRow.Currency)) });
-      AutoSizeGridColumnsOnFirstPageOpen(ReportsPage, grid);
+      List<ReportRow> rows = timeTracker.Reports
+        .Select(CreateReportRow)
+        .OrderByDescending(row => row.EndDate)
+        .ThenBy(row => row.Name)
+        .ToList();
+      HashSet<ReportRow> selectedRows = new();
+      StackPanel table = CreateReportsTable(rows, selectedRows);
 
       ShowMainContent(CreateListPage(new[]
       {
         CreateToolbarButton("New Report", (_, _) => NewReport()),
         CreateToolbarButton("Edit", (_, _) =>
         {
-          if (grid.SelectedItem is ReportRow row)
+          if (selectedRows.Count == 1)
           {
-            EditReport(row.Report);
+            EditReport(selectedRows.First().Report);
+          }
+          else if (selectedRows.Count > 1)
+          {
+            MessageBox.Show(this, "Select one report to edit.", "Reports", MessageBoxButton.OK, MessageBoxImage.Information);
           }
         }),
         CreateToolbarButton("Delete", (_, _) =>
         {
-          List<ReportRow> rows = GetSelectedItems<ReportRow>(grid);
-          if (rows.Count > 0)
+          List<ReportRow> reportsToDelete = selectedRows.ToList();
+          if (reportsToDelete.Count > 0)
           {
-            foreach (ReportRow row in rows)
+            foreach (ReportRow row in reportsToDelete)
             {
               timeTracker.DeleteReport(row.Report);
             }
@@ -2051,20 +2870,20 @@ namespace TimeTracker
         }),
         CreateToolbarButton("Print", (_, _) =>
         {
-          if (grid.SelectedItem is ReportRow row)
+          if (selectedRows.Count == 1)
           {
-            PrintReport(row.Report);
+            PrintReport(selectedRows.First().Report);
           }
         }),
         CreateToolbarButton("Export Word", (_, _) =>
         {
-          if (grid.SelectedItem is ReportRow row)
+          if (selectedRows.Count == 1)
           {
-            SaveReportFile(row.Report);
+            SaveReportFile(selectedRows.First().Report);
           }
         })
       },
-        grid));
+        CreateModernTableScroll(table)));
     }
 
     private void ShowInvoices()
@@ -2076,66 +2895,42 @@ namespace TimeTracker
       HeaderCenterContent.Content = null;
       SaveCurrentPage(InvoicesPage);
 
-      DataGrid grid = CreateReadOnlyGrid();
-      grid.ItemsSource = timeTracker.Invoices.Select(CreateInvoiceRow).ToList();
-      grid.MouseDoubleClick += (_, _) =>
-      {
-        if (grid.SelectedItem is InvoiceRow row)
-        {
-          PrintInvoice(row.Invoice);
-        }
-      };
-
-      grid.Columns.Add(new DataGridTextColumn { Header = "Invoice", Binding = new Binding(nameof(InvoiceRow.InvoiceNumber)) });
-      grid.Columns.Add(new DataGridTextColumn { Header = "Client", Binding = new Binding(nameof(InvoiceRow.ClientName)) });
-      grid.Columns.Add(new DataGridTextColumn { Header = "Issued", Binding = CreateDateBinding(nameof(InvoiceRow.IssueDate)) });
-      grid.Columns.Add(new DataGridTextColumn { Header = "Start", Binding = CreateDateBinding(nameof(InvoiceRow.StartDate)) });
-      grid.Columns.Add(new DataGridTextColumn { Header = "End", Binding = CreateDateBinding(nameof(InvoiceRow.EndDate)) });
-      grid.Columns.Add(new DataGridTextColumn { Header = "Jobs", Binding = new Binding(nameof(InvoiceRow.JobCount)) });
-      grid.Columns.Add(new DataGridTextColumn { Header = "Hours", Binding = new Binding(nameof(InvoiceRow.HoursTotal)) { StringFormat = "0.##" } });
-      grid.Columns.Add(new DataGridTextColumn { Header = "Total", Binding = new Binding(nameof(InvoiceRow.Total)) { StringFormat = "0.00" } });
-      grid.Columns.Add(new DataGridTextColumn { Header = "Currency", Binding = new Binding(nameof(InvoiceRow.Currency)) });
-      AutoSizeGridColumnsOnFirstPageOpen(InvoicesPage, grid);
+      List<InvoiceRow> rows = timeTracker.Invoices
+        .Select(CreateInvoiceRow)
+        .OrderByDescending(row => row.IssueDate)
+        .ThenBy(row => row.InvoiceNumber)
+        .ToList();
+      HashSet<InvoiceRow> selectedRows = new();
+      StackPanel table = CreateInvoicesTable(rows, selectedRows);
 
       DockPanel page = CreateListPage(new[]
       {
         CreateToolbarButton("New", (_, _) => NewInvoice()),
         CreateToolbarButton("Print", (_, _) =>
         {
-          if (grid.SelectedItem is InvoiceRow row)
+          if (selectedRows.Count == 1)
           {
-            PrintInvoice(row.Invoice);
+            PrintInvoice(selectedRows.First().Invoice);
           }
         }),
         CreateToolbarButton("Word", (_, _) =>
         {
-          if (grid.SelectedItem is InvoiceRow row)
+          if (selectedRows.Count == 1)
           {
-            SaveInvoiceFile(row.Invoice);
+            SaveInvoiceFile(selectedRows.First().Invoice);
           }
         }),
         CreateToolbarButton("Delete", (_, _) =>
         {
-          List<InvoiceRow> rows = GetSelectedItems<InvoiceRow>(grid);
-          if (rows.Count == 0)
+          List<InvoiceRow> invoicesToDelete = selectedRows.ToList();
+          if (invoicesToDelete.Count == 0)
           {
             return;
           }
 
-          string message = rows.Count == 1
-            ? "Delete this invoice record?\n\nJobs will not be deleted and the client's current invoice number will not be rolled back."
-            : $"Delete these {rows.Count} invoice records?\n\nJobs will not be deleted and the clients' current invoice numbers will not be rolled back.";
-
-          MessageBoxResult result = MessageBox.Show(
-            this,
-            message,
-            rows.Count == 1 ? "Delete invoice" : "Delete invoices",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Warning);
-
-          if (result == MessageBoxResult.Yes)
+          if (ConfirmDeleteInvoiceRows(invoicesToDelete))
           {
-            foreach (InvoiceRow row in rows)
+            foreach (InvoiceRow row in invoicesToDelete)
             {
               timeTracker.DeleteInvoice(row.Invoice);
             }
@@ -2145,15 +2940,37 @@ namespace TimeTracker
         }),
         CreateToolbarButton("View Jobs", (_, _) =>
         {
-          if (grid.SelectedItem is InvoiceRow row)
+          if (selectedRows.Count == 1)
           {
-            ShowInvoiceJobs(row.Invoice);
+            ShowInvoiceJobs(selectedRows.First().Invoice);
           }
         })
       },
-        grid);
+        CreateModernTableScroll(table));
 
       ShowMainContent(page);
+    }
+
+    private bool ConfirmDeleteInvoiceRows(IEnumerable<InvoiceRow> rows)
+    {
+      List<InvoiceRow> invoiceRows = rows.ToList();
+      if (invoiceRows.Count == 0)
+      {
+        return false;
+      }
+
+      string message = invoiceRows.Count == 1
+        ? "Delete this invoice record?\n\nJobs will not be deleted and the client's current invoice number will not be rolled back."
+        : $"Delete these {invoiceRows.Count} invoice records?\n\nJobs will not be deleted and the clients' current invoice numbers will not be rolled back.";
+
+      MessageBoxResult result = MessageBox.Show(
+        this,
+        message,
+        invoiceRows.Count == 1 ? "Delete invoice" : "Delete invoices",
+        MessageBoxButton.YesNo,
+        MessageBoxImage.Warning);
+
+      return result == MessageBoxResult.Yes;
     }
 
     private void NewReport()

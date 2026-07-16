@@ -2,6 +2,7 @@
 using System.ComponentModel;
 using System.Globalization;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -17,16 +18,27 @@ namespace TimeTracker.Dialogs
   /// </summary>
   public partial class NewWorkEntryDialog : Window
   {
-    private bool _isEditingExistingEntry;
-
-    public NewWorkEntryDialog()
+    public enum DialogMode
     {
+      ManualEntry,
+      JobTimer
+    }
+
+    private bool _isEditingExistingEntry;
+    private readonly DialogMode _mode;
+    private bool _isSyncingDuration;
+
+    public NewWorkEntryDialog(DialogMode mode = DialogMode.ManualEntry)
+    {
+      _mode = mode;
+
       InitializeComponent();
 
       LoadCombos();
       LoadBillingDefaults();
       AttachNumericPasteFilters();
       HookDurationUpdates();
+      ApplyMode();
       UpdateDurationDisplay();
     }
 
@@ -50,6 +62,13 @@ namespace TimeTracker.Dialogs
       BillableToggle.IsChecked = workEntry.IsBillable;
 
       UpdateDurationDisplay();
+    }
+
+    public NewWorkEntryDialog(Project project, DialogMode mode = DialogMode.JobTimer) : this(mode)
+    {
+      Title = "Start job";
+      DialogTitleTextBlock.Text = "Start job";
+      ApplyProject(project);
     }
 
     public string ClientName { get; private set; } = string.Empty;
@@ -84,16 +103,80 @@ namespace TimeTracker.Dialogs
       descriptor?.AddValueChanged(EndTimePicker, (_, _) => UpdateDurationDisplay());
     }
 
+    private void ApplyMode()
+    {
+      if (_mode != DialogMode.JobTimer)
+      {
+        return;
+      }
+
+      Title = "New job";
+      DialogTitleTextBlock.Text = "New job";
+      EndTimePanel.Visibility = Visibility.Collapsed;
+      DurationPanel.Visibility = Visibility.Collapsed;
+      StartTimerNowCheckBox.Visibility = Visibility.Collapsed;
+      StartButton.Content = "Start job";
+      SaveEntryButton.Content = "Save job";
+      StartButton.IsDefault = true;
+      SaveEntryButton.IsDefault = false;
+    }
+
+    private void ApplyProject(Project project)
+    {
+      ClientComboBox.Text = project.Client?.Name ?? string.Empty;
+      ProjectComboBox.Text = project.Name ?? string.Empty;
+      DescriptionTextBox.Text = project.Description ?? string.Empty;
+
+      HourlyRateTextBox.Text = TimeTrackerModel.GetProjectHourlyRate(project).ToString("0.##");
+      CurrencyComboBox.Text = string.IsNullOrWhiteSpace(project.Client?.DefaultCurrency)
+        ? TTAppSettings.Instance.DefaultCurrency
+        : project.Client.DefaultCurrency;
+    }
+
     private void UpdateDurationDisplay()
     {
+      if (_isSyncingDuration)
+      {
+        return;
+      }
+
       if (StartTimerNowCheckBox.IsChecked == true)
       {
-        DurationDisplayText.Text = "Running";
+        SetDurationText("Running");
         return;
       }
 
       TimeSpan duration = EndTimePicker.SelectedDate - StartTimePicker.SelectedDate;
-      DurationDisplayText.Text = duration <= TimeSpan.Zero ? "0m" : FormatDuration(duration);
+      SetDurationText(duration <= TimeSpan.Zero ? "0m" : FormatDuration(duration));
+    }
+
+    private void SetDurationText(string text)
+    {
+      if (DurationTextBox.Text == text)
+      {
+        return;
+      }
+
+      _isSyncingDuration = true;
+      DurationTextBox.Text = text;
+      _isSyncingDuration = false;
+    }
+
+    private void DurationTextBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+      if (_isSyncingDuration || StartTimerNowCheckBox is null || StartTimerNowCheckBox.IsChecked == true)
+      {
+        return;
+      }
+
+      if (!TryParseDuration(DurationTextBox.Text, out TimeSpan duration) || duration <= TimeSpan.Zero)
+      {
+        return;
+      }
+
+      _isSyncingDuration = true;
+      EndTimePicker.SelectedDate = StartTimePicker.SelectedDate + duration;
+      _isSyncingDuration = false;
     }
 
     private static string FormatDuration(TimeSpan duration)
@@ -107,6 +190,73 @@ namespace TimeTracker.Dialogs
       }
 
       return hours > 0 ? $"{hours}h" : $"{minutes}m";
+    }
+
+    private static bool TryParseDuration(string text, out TimeSpan duration)
+    {
+      duration = TimeSpan.Zero;
+
+      if (string.IsNullOrWhiteSpace(text))
+      {
+        return false;
+      }
+
+      text = text.Trim();
+
+      if (text.Contains(':') && TimeSpan.TryParse(text, CultureInfo.CurrentCulture, out duration))
+      {
+        return duration >= TimeSpan.Zero;
+      }
+
+      MatchCollection matches = Regex.Matches(
+        text,
+        @"(?<value>\d+(?:[\.,]\d+)?)\s*(?<unit>h|hr|hrs|hour|hours|m|min|mins|minute|minutes)\b",
+        RegexOptions.IgnoreCase);
+
+      if (matches.Count > 0)
+      {
+        string remainder = Regex.Replace(
+          text,
+          @"(?<value>\d+(?:[\.,]\d+)?)\s*(?<unit>h|hr|hrs|hour|hours|m|min|mins|minute|minutes)\b",
+          string.Empty,
+          RegexOptions.IgnoreCase);
+
+        if (!string.IsNullOrWhiteSpace(remainder))
+        {
+          return false;
+        }
+
+        double totalMinutes = 0;
+        foreach (Match match in matches.Cast<Match>())
+        {
+          if (!TryParseFlexibleDouble(match.Groups["value"].Value, out double value))
+          {
+            return false;
+          }
+
+          string unit = match.Groups["unit"].Value.ToLowerInvariant();
+          totalMinutes += unit.StartsWith("h", StringComparison.Ordinal)
+            ? value * 60
+            : value;
+        }
+
+        duration = TimeSpan.FromMinutes(totalMinutes);
+        return duration >= TimeSpan.Zero;
+      }
+
+      if (TryParseFlexibleDouble(text, out double hours))
+      {
+        duration = TimeSpan.FromHours(hours);
+        return duration >= TimeSpan.Zero;
+      }
+
+      return false;
+    }
+
+    private static bool TryParseFlexibleDouble(string text, out double value)
+    {
+      return double.TryParse(text, NumberStyles.Number, CultureInfo.CurrentCulture, out value)
+        || double.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture, out value);
     }
 
     private void ClientComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -200,6 +350,7 @@ namespace TimeTracker.Dialogs
     {
       bool startNow = StartTimerNowCheckBox.IsChecked == true;
       EndTimePicker.IsEnabled = !startNow;
+      DurationTextBox.IsEnabled = !startNow;
       UpdateDurationDisplay();
     }
 
@@ -240,26 +391,39 @@ namespace TimeTracker.Dialogs
         return;
       }
 
-      if (StartTimerNow)
+      if (_mode == DialogMode.JobTimer)
+      {
+        Duration = StartTimerNow ? null : TimeSpan.Zero;
+      }
+      else if (StartTimerNow)
       {
         Duration = null;
       }
       else
       {
-        TimeSpan duration = EndTimePicker.SelectedDate - StartTimePicker.SelectedDate;
+        if (!TryParseDuration(DurationTextBox.Text, out TimeSpan duration))
+        {
+          DurationTextBox.BorderBrush = Brushes.Red;
+          MessageBox.Show("Please enter a valid duration.");
+          return;
+        }
 
         if (duration <= TimeSpan.Zero)
         {
-          MessageBox.Show("The end time must be after the start time.");
+          DurationTextBox.BorderBrush = Brushes.Red;
+          MessageBox.Show("Please enter a duration greater than zero.");
           return;
         }
 
         if (duration.TotalMinutes < 1)
         {
+          DurationTextBox.BorderBrush = Brushes.Red;
           MessageBox.Show("Please enter at least one minute of work before saving an entry.");
           return;
         }
 
+        DurationTextBox.BorderBrush = Brushes.Gray;
+        EndTimePicker.SelectedDate = StartTimePicker.SelectedDate + duration;
         Duration = duration;
       }
 
@@ -273,7 +437,7 @@ namespace TimeTracker.Dialogs
       HourlyRate = hourlyRate;
       Currency = TTAppSettings.NormalizeCurrency(CurrencyComboBox.Text);
       IsBillable = BillableToggle.IsChecked == true;
-      StartTime = StartTimerNow ? DateTime.Now : StartTimePicker.SelectedDate;
+      StartTime = StartTimePicker.SelectedDate;
 
       DialogResult = true;
       Close();

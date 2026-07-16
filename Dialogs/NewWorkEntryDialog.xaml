@@ -272,38 +272,23 @@
             <Controls:StackedDateTimePicker x:Name="StartTimePicker" SelectedDate="{Binding StartTime}" />
           </StackPanel>
 
-          <StackPanel Grid.Column="2">
+          <StackPanel x:Name="EndTimePanel" Grid.Column="2">
             <TextBlock Style="{StaticResource DialogLabelStyle}" Text="End" />
             <Controls:StackedDateTimePicker x:Name="EndTimePicker" SelectedDate="{Binding EndTime}" />
           </StackPanel>
 
-          <StackPanel Grid.Column="4" VerticalAlignment="Top">
+          <StackPanel x:Name="DurationPanel" Grid.Column="4" VerticalAlignment="Top">
             <TextBlock Style="{StaticResource DialogLabelStyle}" Text="Duration" />
-            <Border
+            <TextBox
+              x:Name="DurationTextBox"
               Width="140"
               Height="42"
               HorizontalAlignment="Left"
-              Background="{StaticResource LockedFieldBrush}"
-              BorderBrush="{StaticResource BorderBrush}"
-              BorderThickness="1"
-              CornerRadius="2">
-              <Grid Margin="12,0">
-                <TextBlock
-                  x:Name="DurationDisplayText"
-                  VerticalAlignment="Center"
-                  FontSize="16"
-                  Foreground="{StaticResource PrimaryTextBrush}"
-                  Text="0m" />
-                <TextBlock
-                  HorizontalAlignment="Right"
-                  VerticalAlignment="Center"
-                  FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
-                  FontSize="14"
-                  Foreground="{StaticResource SecondaryTextBrush}"
-                  Text="&#xE72E;"
-                  ToolTip="Duration is calculated from Start and End" />
-              </Grid>
-            </Border>
+              VerticalContentAlignment="Center"
+              FontSize="16"
+              Text="0m"
+              TextChanged="DurationTextBox_TextChanged"
+              ToolTip="Enter a duration such as 1h 30m, 90m, or 1:30" />
           </StackPanel>
         </Grid>
 

@@ -5296,66 +5296,6 @@ namespace TimeTracker
       public TTDataObject Item { get; }
     }
 
-    private static Style CreateTimesheetRowStyle()
-    {
-      Style rowStyle = new(typeof(DataGridRow));
-      rowStyle.Setters.Add(new Setter(Control.BackgroundProperty, Brushes.Transparent));
-
-      DataTrigger runningTrigger = new()
-      {
-        Binding = new Binding(nameof(WorkEntry.IsRunning)),
-        Value = true
-      };
-      runningTrigger.Setters.Add(new Setter(Control.BackgroundProperty, new SolidColorBrush(Color.FromRgb(223, 245, 223))));
-      rowStyle.Triggers.Add(runningTrigger);
-
-      return rowStyle;
-    }
-
-    private void TimesheetsGrid_Sorting(object sender, DataGridSortingEventArgs e)
-    {
-      e.Handled = true;
-
-      if (sender is not DataGrid grid || e.Column.SortMemberPath == null)
-      {
-        return;
-      }
-
-      ListSortDirection direction = e.Column.SortDirection == ListSortDirection.Ascending
-        ? ListSortDirection.Descending
-        : ListSortDirection.Ascending;
-
-      foreach (DataGridColumn column in grid.Columns)
-      {
-        column.SortDirection = null;
-      }
-
-      e.Column.SortDirection = direction;
-
-      ICollectionView view = CollectionViewSource.GetDefaultView(grid.ItemsSource);
-      view.SortDescriptions.Clear();
-      view.SortDescriptions.Add(new SortDescription(e.Column.SortMemberPath, direction));
-
-      if (e.Column.SortMemberPath == nameof(WorkEntry.ClientName) || e.Column.SortMemberPath == nameof(WorkEntry.ProjectName))
-      {
-        view.SortDescriptions.Add(new SortDescription(nameof(WorkEntry.StartTime), ListSortDirection.Descending));
-      }
-
-      view.Refresh();
-    }
-
-    private void TimesheetsGrid_RowEditEnding(object? sender, DataGridRowEditEndingEventArgs e)
-    {
-      Dispatcher.BeginInvoke(() =>
-      {
-        if (e.Row.Item is WorkEntry workEntry)
-        {
-          workEntry.Currency = TTAppSettings.NormalizeCurrency(workEntry.Currency);
-          timeTracker.SaveChanges();
-        }
-      });
-    }
-
     private void ShowMainContent(UIElement content)
     {
       mainContentGrid.Children.Clear();

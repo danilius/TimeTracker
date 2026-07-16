@@ -3068,23 +3068,22 @@ namespace TimeTracker
 
     private void NewProject()
     {
-      if (ShowProjectDialog(null, out Client? client, out string name, out string description, out double rate) && client != null)
+      if (ShowProjectDialog(null, out Client? client, out string name, out string description, out double rate, out bool useClientDefaultRate) && client != null)
       {
-        Project project = timeTracker.CreateProject(client, name, description);
-        project.Rate = rate;
-        timeTracker.SaveChanges();
+        timeTracker.CreateProject(client, name, description, rate, useClientDefaultRate);
         ShowProjects();
       }
     }
 
     private void EditProject(Project project)
     {
-      if (ShowProjectDialog(project, out Client? client, out string name, out string description, out double rate) && client != null)
+      if (ShowProjectDialog(project, out Client? client, out string name, out string description, out double rate, out bool useClientDefaultRate) && client != null)
       {
-        double oldRate = project.Rate;
-        timeTracker.UpdateProject(project, client, name, description, rate);
+        decimal oldRate = TimeTrackerModel.GetProjectHourlyRate(project);
+        timeTracker.UpdateProject(project, client, name, description, rate, useClientDefaultRate);
+        decimal newRate = TimeTrackerModel.GetProjectHourlyRate(project);
 
-        if (oldRate != rate)
+        if (oldRate != newRate)
         {
           MessageBoxResult result = MessageBox.Show(
             this,
@@ -3797,7 +3796,7 @@ namespace TimeTracker
       return accepted;
     }
 
-    private bool ShowProjectDialog(Project? project, out Client? client, out string name, out string description, out double rate)
+    private bool ShowProjectDialog(Project? project, out Client? client, out string name, out string description, out double rate, out bool useClientDefaultRate)
     {
       ComboBox clientComboBox = new()
       {
@@ -3809,6 +3808,21 @@ namespace TimeTracker
       TextBox nameTextBox = CreateDialogTextBox(project?.Name ?? string.Empty);
       TextBox descriptionTextBox = CreateDialogTextBox(project?.Description ?? string.Empty);
       TextBox rateTextBox = CreateDialogTextBox(project?.Rate.ToString("0.##") ?? "0");
+      CheckBox useClientDefaultRateCheckBox = new()
+      {
+        Content = "Use client default rate",
+        IsChecked = project?.UseClientDefaultRate ?? true,
+        HorizontalAlignment = HorizontalAlignment.Center
+      };
+
+      void UpdateRateTextBoxState()
+      {
+        rateTextBox.IsEnabled = useClientDefaultRateCheckBox.IsChecked != true;
+      }
+
+      useClientDefaultRateCheckBox.Checked += (_, _) => UpdateRateTextBoxState();
+      useClientDefaultRateCheckBox.Unchecked += (_, _) => UpdateRateTextBoxState();
+      UpdateRateTextBoxState();
 
       bool accepted = ShowSimpleForm(
         project == null ? "New project" : "Edit project",
@@ -3817,6 +3831,7 @@ namespace TimeTracker
           ("Client", (Control)clientComboBox),
           ("Name", (Control)nameTextBox),
           ("Description", (Control)descriptionTextBox),
+          ("Rate source", (Control)useClientDefaultRateCheckBox),
           ("Rate", (Control)rateTextBox)
         });
 
@@ -3824,6 +3839,7 @@ namespace TimeTracker
       name = nameTextBox.Text.Trim();
       description = descriptionTextBox.Text.Trim();
       rate = 0;
+      useClientDefaultRate = useClientDefaultRateCheckBox.IsChecked == true;
 
       if (!accepted)
       {
@@ -3842,7 +3858,7 @@ namespace TimeTracker
         return false;
       }
 
-      if (!double.TryParse(rateTextBox.Text, out rate) || rate < 0)
+      if (!useClientDefaultRate && (!double.TryParse(rateTextBox.Text, out rate) || rate < 0))
       {
         MessageBox.Show(this, "Enter a project rate of zero or greater.", "Project", MessageBoxButton.OK, MessageBoxImage.Warning);
         return false;

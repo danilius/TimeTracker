@@ -88,6 +88,10 @@ namespace TimeTracker.Models
         foreach (Project project in client.Projects)
         {
           project.Client = client;
+          if (project.Rate <= 0)
+          {
+            project.UseClientDefaultRate = true;
+          }
         }
       }
 
@@ -372,6 +376,7 @@ namespace TimeTracker.Models
     {
       TTAppSettings settings = TTAppSettings.Instance;
       Client? client = project.Client;
+      decimal defaultHourlyRate = GetProjectHourlyRate(project);
       WorkEntry workEntry = new()
       {
         ID = Guid.NewGuid(),
@@ -380,7 +385,7 @@ namespace TimeTracker.Models
         EndTime = startTime + (duration ?? TimeSpan.Zero),
         Description = description,
         IsBillable = isBillable,
-        HourlyRate = hourlyRate ?? client?.DefaultHourlyRate ?? settings.DefaultHourlyRate,
+        HourlyRate = hourlyRate ?? defaultHourlyRate,
         Currency = string.IsNullOrWhiteSpace(currency)
           ? (string.IsNullOrWhiteSpace(client?.DefaultCurrency) ? settings.DefaultCurrency : client.DefaultCurrency)
           : TTAppSettings.NormalizeCurrency(currency)
@@ -638,10 +643,11 @@ namespace TimeTracker.Models
       client.DefaultCurrency = string.IsNullOrWhiteSpace(defaultCurrency)
         ? TTAppSettings.Instance.DefaultCurrency
         : TTAppSettings.NormalizeCurrency(defaultCurrency);
+
       SaveData();
     }
 
-    public void UpdateProject(Project project, Client client, string name, string? description, double rate)
+    public void UpdateProject(Project project, Client client, string name, string? description, double rate, bool useClientDefaultRate)
     {
       if (project.Client != client)
       {
@@ -652,13 +658,14 @@ namespace TimeTracker.Models
 
       project.Name = name;
       project.Description = description;
-      project.Rate = rate;
+      project.UseClientDefaultRate = useClientDefaultRate;
+      project.Rate = useClientDefaultRate ? 0 : rate;
       SaveData();
     }
 
     public void ApplyProjectRateToJobs(Project project)
     {
-      decimal hourlyRate = Convert.ToDecimal(project.Rate);
+      decimal hourlyRate = GetProjectHourlyRate(project);
 
       foreach (WorkEntry workEntry in project.WorkEntries)
       {
@@ -797,7 +804,7 @@ namespace TimeTracker.Models
     }
 
     public event EventHandler<ProjectEventArgs>? ProjectAdded;
-    public Project CreateProject(Client client, string name, string? description = null)
+    public Project CreateProject(Client client, string name, string? description = null, double rate = 0, bool useClientDefaultRate = true)
     {
       Project project = new()
       {
@@ -805,6 +812,8 @@ namespace TimeTracker.Models
         Name = name,
         Client = client,
         Description = description,
+        Rate = useClientDefaultRate ? 0 : rate,
+        UseClientDefaultRate = useClientDefaultRate,
         ProjectColour = GenerateRandomPastelColor()
       };
 
@@ -815,6 +824,16 @@ namespace TimeTracker.Models
       SaveData();
 
       return project;
+    }
+
+    public static decimal GetProjectHourlyRate(Project project)
+    {
+      if (!project.UseClientDefaultRate)
+      {
+        return Convert.ToDecimal(project.Rate);
+      }
+
+      return project.Client?.DefaultHourlyRate ?? TTAppSettings.Instance.DefaultHourlyRate;
     }
 
     public event EventHandler<ClientEventArgs>? ClientAdded;

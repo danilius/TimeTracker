@@ -79,6 +79,20 @@ namespace TimeTracker.Models
       }
     }
 
+    private bool _useClientDefaultRate;
+    public bool UseClientDefaultRate
+    {
+      get { return _useClientDefaultRate; }
+      set
+      {
+        if (_useClientDefaultRate != value)
+        {
+          _useClientDefaultRate = value;
+          OnPropertyChanged();
+        }
+      }
+    }
+
     private TrulyObservableCollection<WorkEntry> _workEntries = new();
     public TrulyObservableCollection<WorkEntry> WorkEntries
     {

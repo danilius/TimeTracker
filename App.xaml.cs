@@ -34,7 +34,12 @@ namespace Time_Tracker
     private void App_DispatcherUnhandledException(object sender, System.Windows.Threading.DispatcherUnhandledExceptionEventArgs e)
     {
       ReportFatalException("Dispatcher exception", e.Exception);
-      e.Handled = false;
+
+      // Mark handled so WPF does not tear the process down before the crash
+      // report is shown, then exit deliberately rather than continuing on with
+      // whatever state the exception left behind.
+      e.Handled = true;
+      Shutdown(1);
     }
 
     private static void CurrentDomain_UnhandledException(object sender, UnhandledExceptionEventArgs e)
@@ -54,11 +59,11 @@ namespace Time_Tracker
     private static void ReportFatalException(string title, Exception exception)
     {
       string errorMessage = $"{title}: {exception}";
+      string? crashLogPath = null;
 
       try
       {
-        Directory.CreateDirectory(GetAppDataFolder());
-        File.AppendAllText(GetStartupErrorLogPath(), $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {errorMessage}{Environment.NewLine}{Environment.NewLine}");
+        crashLogPath = WriteCrashLog(title, exception);
         Logger.Instance.LogEvent(errorMessage);
       }
       catch
@@ -69,8 +74,10 @@ namespace Time_Tracker
       try
       {
         MessageBox.Show(
-          errorMessage,
-          "Time Tracker startup error",
+          crashLogPath is null
+            ? errorMessage
+            : $"{errorMessage}{Environment.NewLine}{Environment.NewLine}Crash log: {crashLogPath}",
+          "Time Tracker error",
           MessageBoxButton.OK,
           MessageBoxImage.Error);
       }
@@ -80,9 +87,31 @@ namespace Time_Tracker
       }
     }
 
-    private static string GetStartupErrorLogPath()
+    private static string WriteCrashLog(string title, Exception exception)
     {
-      return Path.Combine(GetAppDataFolder(), "startup-errors.log");
+      string crashLogFolder = GetCrashLogFolder();
+      Directory.CreateDirectory(crashLogFolder);
+
+      string timestamp = DateTime.Now.ToString("yyyyMMdd-HHmmss-fff");
+      string safeTitle = string.Join("-", title.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries))
+        .Replace(' ', '-')
+        .ToLowerInvariant();
+      string crashLogPath = Path.Combine(crashLogFolder, $"{timestamp}-{safeTitle}.log");
+
+      File.WriteAllText(
+        crashLogPath,
+        $"Time Tracker crash log{Environment.NewLine}" +
+        $"Timestamp: {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff zzz}{Environment.NewLine}" +
+        $"Event: {title}{Environment.NewLine}" +
+        $"Exception type: {exception.GetType().FullName}{Environment.NewLine}" +
+        $"{Environment.NewLine}{exception}{Environment.NewLine}");
+
+      return crashLogPath;
+    }
+
+    private static string GetCrashLogFolder()
+    {
+      return Path.Combine(GetAppDataFolder(), "crash logs");
     }
 
     private static string GetAppDataFolder()

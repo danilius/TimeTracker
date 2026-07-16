@@ -13,6 +13,7 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Data;
 using System.Windows.Documents;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using TimeTracker.Dialogs;
@@ -55,6 +56,7 @@ namespace TimeTracker
     private double normalMinWidthBeforeCompact;
     private double normalMinHeightBeforeCompact;
     private readonly System.Windows.Threading.DispatcherTimer jobsPageTimer = new() { Interval = TimeSpan.FromSeconds(1) };
+    private readonly HashSet<Guid> selectedWorkEntryIDs = new();
     private TextBlock? jobsActiveTimerTextBlock;
     private static readonly Brush AccentBrush = BrushFromHex("#0090EE");
     private static readonly Brush PrimaryTextBrush = BrushFromHex("#17212B");
@@ -166,6 +168,8 @@ namespace TimeTracker
 
     private void TimesheetsButton_Click(object sender, RoutedEventArgs e)
     {
+      // Arriving at the page is a fresh start; only in-page redraws keep the selection.
+      selectedWorkEntryIDs.Clear();
       ShowTimesheets();
     }
 
@@ -1935,30 +1939,166 @@ namespace TimeTracker
       return grid;
     }
 
-    private static UIElement CreateSelectionCell<T>(T item, HashSet<T> selectedItems, Panel row) where T : notnull
+    /// <summary>
+    /// The checked rows of a table, plus the anchor row that Shift-click extends a range from.
+    /// </summary>
+    private sealed class TableSelection<T> : IEnumerable<T> where T : notnull
+    {
+      private readonly HashSet<T> selectedItems = new();
+      private readonly List<CheckBox> boxes = new();
+      private CheckBox? selectAllBox;
+      private int anchorIndex = -1;
+      private int rangeEnd = -1;
+      private bool anchorState;
+
+      public event Action? Changed;
+
+      public int Count => selectedItems.Count;
+
+      public bool Contains(T item)
+      {
+        return selectedItems.Contains(item);
+      }
+
+      public void Add(T item)
+      {
+        selectedItems.Add(item);
+        Notify();
+      }
+
+      public void Remove(T item)
+      {
+        selectedItems.Remove(item);
+        Notify();
+      }
+
+      public void Register(CheckBox box)
+      {
+        boxes.Add(box);
+        UpdateSelectAll();
+      }
+
+      /// <summary>
+      /// Wires a header checkbox that selects or clears every row, and shows the indeterminate
+      /// state while only some rows are checked.
+      /// </summary>
+      public void AttachSelectAll(CheckBox headerBox)
+      {
+        selectAllBox = headerBox;
+
+        // Three-state is display-only: a user click must mean all-or-nothing, never indeterminate.
+        headerBox.IsThreeState = false;
+        headerBox.Click += (_, _) =>
+        {
+          // Intent comes from the selection, not from headerBox.IsChecked: WPF's toggle turns an
+          // indeterminate box off, but a partial selection should fill to all rather than clear.
+          bool selectAll = selectedItems.Count < boxes.Count;
+          anchorIndex = -1;
+          rangeEnd = -1;
+          foreach (CheckBox box in boxes)
+          {
+            box.IsChecked = selectAll;
+          }
+
+          UpdateSelectAll();
+        };
+
+        UpdateSelectAll();
+      }
+
+      private void Notify()
+      {
+        UpdateSelectAll();
+        Changed?.Invoke();
+      }
+
+      private void UpdateSelectAll()
+      {
+        if (selectAllBox == null)
+        {
+          return;
+        }
+
+        selectAllBox.IsEnabled = boxes.Count > 0;
+        selectAllBox.IsChecked = selectedItems.Count == 0
+          ? false
+          : selectedItems.Count == boxes.Count ? true : null;
+      }
+
+      public void ExtendOrAnchor(CheckBox box)
+      {
+        int index = boxes.IndexOf(box);
+        if (index < 0)
+        {
+          return;
+        }
+
+        bool extend = (Keyboard.Modifiers & ModifierKeys.Shift) == ModifierKeys.Shift
+          && anchorIndex >= 0
+          && anchorIndex < boxes.Count;
+        if (!extend)
+        {
+          anchorIndex = index;
+          rangeEnd = index;
+          anchorState = box.IsChecked == true;
+          return;
+        }
+
+        // The range takes the anchor's state, not the clicked box's: the clicked box may already be
+        // checked from an earlier range, and toggling it would invert the whole range on a re-adjust.
+        // Clearing the old range first is what lets a range shrink. Assigning IsChecked raises
+        // Checked/Unchecked, keeping selectedItems in step, but not Click, so this cannot recurse.
+        SetRange(anchorIndex, rangeEnd, !anchorState);
+        SetRange(anchorIndex, index, anchorState);
+        rangeEnd = index;
+      }
+
+      private void SetRange(int from, int to, bool isChecked)
+      {
+        for (int i = Math.Min(from, to); i <= Math.Max(from, to); i++)
+        {
+          boxes[i].IsChecked = isChecked;
+        }
+      }
+
+      public IEnumerator<T> GetEnumerator()
+      {
+        return selectedItems.GetEnumerator();
+      }
+
+      System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator()
+      {
+        return GetEnumerator();
+      }
+    }
+
+    private static UIElement CreateSelectionCell<T>(T item, TableSelection<T> selection, Panel row, Brush? rowBackground = null) where T : notnull
     {
       CheckBox selectBox = new()
       {
         HorizontalAlignment = HorizontalAlignment.Center,
         VerticalAlignment = VerticalAlignment.Center,
-        IsChecked = selectedItems.Contains(item)
+        IsChecked = selection.Contains(item)
       };
 
       void UpdateSelection()
       {
-        row.Background = selectedItems.Contains(item) ? BrushFromHex("#F4FAFF") : Brushes.White;
+        row.Background = selection.Contains(item) ? BrushFromHex("#F4FAFF") : rowBackground ?? Brushes.White;
       }
 
       selectBox.Checked += (_, _) =>
       {
-        selectedItems.Add(item);
+        selection.Add(item);
         UpdateSelection();
       };
       selectBox.Unchecked += (_, _) =>
       {
-        selectedItems.Remove(item);
+        selection.Remove(item);
         UpdateSelection();
       };
+      selectBox.Click += (_, _) => selection.ExtendOrAnchor(selectBox);
+
+      selection.Register(selectBox);
       UpdateSelection();
       Grid.SetColumn(selectBox, 0);
       return selectBox;
@@ -2275,7 +2415,7 @@ namespace TimeTracker
       List<Client> clients = timeTracker.ActiveClients
         .OrderBy(client => client.Name)
         .ToList();
-      HashSet<Client> selectedClients = new();
+      TableSelection<Client> selectedClients = new();
       StackPanel table = CreateClientsTable(clients, selectedClients);
 
       ShowMainContent(CreateListPage(
@@ -2320,7 +2460,7 @@ namespace TimeTracker
         .OrderBy(project => project.Client?.Name)
         .ThenBy(project => project.Name)
         .ToList();
-      HashSet<Project> selectedProjects = new();
+      TableSelection<Project> selectedProjects = new();
       StackPanel table = CreateProjectsTable(projects, selectedProjects);
 
       ShowMainContent(CreateListPage(
@@ -2364,7 +2504,17 @@ namespace TimeTracker
       List<WorkEntry> entries = timeTracker.WorkEntries
         .OrderByDescending(workEntry => workEntry.StartTime)
         .ToList();
-      HashSet<WorkEntry> selectedEntries = new();
+      TableSelection<WorkEntry> selectedEntries = new();
+      foreach (WorkEntry entry in entries.Where(entry => selectedWorkEntryIDs.Contains(entry.ID)))
+      {
+        selectedEntries.Add(entry);
+      }
+
+      // ShowTimesheets rebuilds every row, so the selection has to survive as IDs. Syncing once up
+      // front also drops IDs of entries that no longer exist.
+      SyncSelectedWorkEntryIDs(selectedEntries);
+      selectedEntries.Changed += () => SyncSelectedWorkEntryIDs(selectedEntries);
+
       StackPanel table = CreateTimesheetsTable(entries, selectedEntries);
 
       ShowMainContent(CreateListPage(
@@ -2402,10 +2552,19 @@ namespace TimeTracker
         }));
     }
 
-    private StackPanel CreateTimesheetsTable(List<WorkEntry> entries, HashSet<WorkEntry> selectedEntries)
+    private void SyncSelectedWorkEntryIDs(TableSelection<WorkEntry> selectedEntries)
+    {
+      selectedWorkEntryIDs.Clear();
+      foreach (WorkEntry entry in selectedEntries)
+      {
+        selectedWorkEntryIDs.Add(entry.ID);
+      }
+    }
+
+    private StackPanel CreateTimesheetsTable(List<WorkEntry> entries, TableSelection<WorkEntry> selectedEntries)
     {
       StackPanel table = new();
-      table.Children.Add(CreateTimesheetsTableHeader());
+      table.Children.Add(CreateTimesheetsTableHeader(selectedEntries));
 
       if (entries.Count == 0)
       {
@@ -2421,16 +2580,18 @@ namespace TimeTracker
       return table;
     }
 
-    private static UIElement CreateTimesheetsTableHeader()
+    private static UIElement CreateTimesheetsTableHeader(TableSelection<WorkEntry> selectedEntries)
     {
       Grid header = CreateTimesheetsTableGrid();
       header.Background = BrushFromHex("#F8FAFC");
 
-      TextBlock selectorHeader = new()
+      CheckBox selectorHeader = new()
       {
         HorizontalAlignment = HorizontalAlignment.Center,
-        VerticalAlignment = VerticalAlignment.Center
+        VerticalAlignment = VerticalAlignment.Center,
+        ToolTip = "Select all entries"
       };
+      selectedEntries.AttachSelectAll(selectorHeader);
       Grid.SetColumn(selectorHeader, 0);
       header.Children.Add(selectorHeader);
 
@@ -2444,11 +2605,10 @@ namespace TimeTracker
       return header;
     }
 
-    private UIElement CreateTimesheetTableRow(WorkEntry entry, HashSet<WorkEntry> selectedEntries)
+    private UIElement CreateTimesheetTableRow(WorkEntry entry, TableSelection<WorkEntry> selectedEntries)
     {
       Grid row = CreateTimesheetsTableGrid();
       row.MinHeight = 58;
-      row.Background = entry.IsRunning ? WithOpacity(SuccessBrush, 0.08) : Brushes.White;
       row.MouseLeftButtonDown += (_, e) =>
       {
         if (e.ClickCount == 2)
@@ -2458,16 +2618,8 @@ namespace TimeTracker
         }
       };
 
-      CheckBox selectBox = new()
-      {
-        HorizontalAlignment = HorizontalAlignment.Center,
-        VerticalAlignment = VerticalAlignment.Center,
-        IsChecked = selectedEntries.Contains(entry)
-      };
-      selectBox.Checked += (_, _) => selectedEntries.Add(entry);
-      selectBox.Unchecked += (_, _) => selectedEntries.Remove(entry);
-      Grid.SetColumn(selectBox, 0);
-      row.Children.Add(selectBox);
+      Brush rowBackground = entry.IsRunning ? WithOpacity(SuccessBrush, 0.08) : Brushes.White;
+      row.Children.Add(CreateSelectionCell(entry, selectedEntries, row, rowBackground));
 
       row.Children.Add(CreateClientCell(entry));
       Grid.SetColumn(row.Children[^1], 1);
@@ -2578,7 +2730,7 @@ namespace TimeTracker
       return actions;
     }
 
-    private StackPanel CreateClientsTable(List<Client> clients, HashSet<Client> selectedClients)
+    private StackPanel CreateClientsTable(List<Client> clients, TableSelection<Client> selectedClients)
     {
       StackPanel table = new();
       Grid header = CreateModernTableGrid(44, 1.45, 1.45, 0.95, 0.9, 0.75, 0.8);
@@ -2605,7 +2757,7 @@ namespace TimeTracker
       return table;
     }
 
-    private UIElement CreateClientTableRow(Client client, HashSet<Client> selectedClients)
+    private UIElement CreateClientTableRow(Client client, TableSelection<Client> selectedClients)
     {
       Grid row = CreateModernTableGrid(44, 1.45, 1.45, 0.95, 0.9, 0.75, 0.8);
       row.MinHeight = 62;
@@ -2638,7 +2790,7 @@ namespace TimeTracker
       return row;
     }
 
-    private StackPanel CreateProjectsTable(List<Project> projects, HashSet<Project> selectedProjects)
+    private StackPanel CreateProjectsTable(List<Project> projects, TableSelection<Project> selectedProjects)
     {
       StackPanel table = new();
       Grid header = CreateModernTableGrid(44, 1.45, 1.25, 1.65, 0.75, 0.8, 0.8);
@@ -2665,7 +2817,7 @@ namespace TimeTracker
       return table;
     }
 
-    private UIElement CreateProjectTableRow(Project project, HashSet<Project> selectedProjects)
+    private UIElement CreateProjectTableRow(Project project, TableSelection<Project> selectedProjects)
     {
       Grid row = CreateModernTableGrid(44, 1.45, 1.25, 1.65, 0.75, 0.8, 0.8);
       row.MinHeight = 62;
@@ -2697,7 +2849,7 @@ namespace TimeTracker
       return row;
     }
 
-    private StackPanel CreateReportsTable(List<ReportRow> rows, HashSet<ReportRow> selectedRows)
+    private StackPanel CreateReportsTable(List<ReportRow> rows, TableSelection<ReportRow> selectedRows)
     {
       StackPanel table = new();
       Grid header = CreateModernTableGrid(44, 1.5, 1.35, 1.2, 1.1, 0.65, 0.7, 0.9, 1.05);
@@ -2726,7 +2878,7 @@ namespace TimeTracker
       return table;
     }
 
-    private UIElement CreateReportTableRow(ReportRow reportRow, HashSet<ReportRow> selectedRows)
+    private UIElement CreateReportTableRow(ReportRow reportRow, TableSelection<ReportRow> selectedRows)
     {
       Grid row = CreateModernTableGrid(44, 1.5, 1.35, 1.2, 1.1, 0.65, 0.7, 0.9, 1.05);
       row.MinHeight = 62;
@@ -2760,7 +2912,7 @@ namespace TimeTracker
       return row;
     }
 
-    private StackPanel CreateInvoicesTable(List<InvoiceRow> rows, HashSet<InvoiceRow> selectedRows)
+    private StackPanel CreateInvoicesTable(List<InvoiceRow> rows, TableSelection<InvoiceRow> selectedRows)
     {
       StackPanel table = new();
       Grid header = CreateModernTableGrid(44, 1.25, 1.3, 1.35, 0.65, 0.7, 0.9, 1.25);
@@ -2788,7 +2940,7 @@ namespace TimeTracker
       return table;
     }
 
-    private UIElement CreateInvoiceTableRow(InvoiceRow invoiceRow, HashSet<InvoiceRow> selectedRows)
+    private UIElement CreateInvoiceTableRow(InvoiceRow invoiceRow, TableSelection<InvoiceRow> selectedRows)
     {
       Grid row = CreateModernTableGrid(44, 1.25, 1.3, 1.35, 0.65, 0.7, 0.9, 1.25);
       row.MinHeight = 62;
@@ -2838,7 +2990,7 @@ namespace TimeTracker
         .OrderByDescending(row => row.EndDate)
         .ThenBy(row => row.Name)
         .ToList();
-      HashSet<ReportRow> selectedRows = new();
+      TableSelection<ReportRow> selectedRows = new();
       StackPanel table = CreateReportsTable(rows, selectedRows);
 
       ShowMainContent(CreateListPage(new[]
@@ -2900,7 +3052,7 @@ namespace TimeTracker
         .OrderByDescending(row => row.IssueDate)
         .ThenBy(row => row.InvoiceNumber)
         .ToList();
-      HashSet<InvoiceRow> selectedRows = new();
+      TableSelection<InvoiceRow> selectedRows = new();
       StackPanel table = CreateInvoicesTable(rows, selectedRows);
 
       DockPanel page = CreateListPage(new[]

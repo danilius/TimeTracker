@@ -57,6 +57,8 @@ namespace TimeTracker
     private double normalMinHeightBeforeCompact;
     private readonly System.Windows.Threading.DispatcherTimer jobsPageTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     private readonly HashSet<Guid> selectedWorkEntryIDs = new();
+    private TimesheetSortColumn timesheetSortColumn = TimesheetSortColumn.Start;
+    private ListSortDirection timesheetSortDirection = ListSortDirection.Descending;
     private TextBlock? jobsActiveTimerTextBlock;
     private static readonly Brush AccentBrush = BrushFromHex("#0090EE");
     private static readonly Brush PrimaryTextBrush = BrushFromHex("#17212B");
@@ -2501,9 +2503,7 @@ namespace TimeTracker
       HeaderCenterContent.Content = null;
       SaveCurrentPage(TimesheetsPage);
 
-      List<WorkEntry> entries = timeTracker.WorkEntries
-        .OrderByDescending(workEntry => workEntry.StartTime)
-        .ToList();
+      List<WorkEntry> entries = SortTimesheetEntries(timeTracker.WorkEntries);
       TableSelection<WorkEntry> selectedEntries = new();
       foreach (WorkEntry entry in entries.Where(entry => selectedWorkEntryIDs.Contains(entry.ID)))
       {
@@ -2561,6 +2561,82 @@ namespace TimeTracker
       }
     }
 
+    /// <summary>
+    /// A Time sheets column the table can be ordered by. Actions and the selection checkbox have no
+    /// meaningful order, so they are absent.
+    /// </summary>
+    private enum TimesheetSortColumn
+    {
+      Client,
+      Project,
+      Start,
+      Duration,
+      Rate,
+      Billable
+    }
+
+    private List<WorkEntry> SortTimesheetEntries(IEnumerable<WorkEntry> entries)
+    {
+      bool isAscending = timesheetSortDirection == ListSortDirection.Ascending;
+
+      // Running entries float above the sorted list, matching the Recent jobs panel.
+      IOrderedEnumerable<WorkEntry> ordered = entries.OrderByDescending(entry => entry.IsRunning);
+
+      ordered = timesheetSortColumn switch
+      {
+        TimesheetSortColumn.Client => ThenBySortDirection(ordered, entry => entry.ClientName, StringComparer.CurrentCultureIgnoreCase, isAscending),
+        TimesheetSortColumn.Project => ThenBySortDirection(ordered, entry => entry.ProjectName, StringComparer.CurrentCultureIgnoreCase, isAscending),
+        TimesheetSortColumn.Duration => ThenBySortDirection(ordered, entry => entry.Duration, null, isAscending),
+        TimesheetSortColumn.Rate => ThenBySortDirection(ordered, entry => entry.HourlyRate, null, isAscending),
+        TimesheetSortColumn.Billable => ThenBySortDirection(ordered, entry => entry.IsBillable, null, isAscending),
+        _ => ThenBySortDirection(ordered, entry => entry.StartTime, null, isAscending)
+      };
+
+      // Every column breaks ties on date, newest first. That is what groups a client's jobs by date,
+      // and it means reversing a column flips only that column: dates stay newest-first inside each
+      // group rather than turning the client sort into an oldest-first list.
+      return ordered.ThenByDescending(entry => entry.StartTime).ToList();
+    }
+
+    private static IOrderedEnumerable<WorkEntry> ThenBySortDirection<TKey>(
+      IOrderedEnumerable<WorkEntry> entries,
+      Func<WorkEntry, TKey> keySelector,
+      IComparer<TKey>? comparer,
+      bool isAscending)
+    {
+      return isAscending
+        ? entries.ThenBy(keySelector, comparer)
+        : entries.ThenByDescending(keySelector, comparer);
+    }
+
+    private void SortTimesheetsBy(TimesheetSortColumn sortColumn)
+    {
+      if (timesheetSortColumn == sortColumn)
+      {
+        timesheetSortDirection = timesheetSortDirection == ListSortDirection.Ascending
+          ? ListSortDirection.Descending
+          : ListSortDirection.Ascending;
+      }
+      else
+      {
+        timesheetSortColumn = sortColumn;
+        timesheetSortDirection = DefaultSortDirection(sortColumn);
+      }
+
+      ShowTimesheets();
+    }
+
+    /// <summary>
+    /// Where a column starts when it is first clicked: names read naturally A-Z, while dates, money
+    /// and durations read naturally largest-first.
+    /// </summary>
+    private static ListSortDirection DefaultSortDirection(TimesheetSortColumn sortColumn)
+    {
+      return sortColumn is TimesheetSortColumn.Client or TimesheetSortColumn.Project
+        ? ListSortDirection.Ascending
+        : ListSortDirection.Descending;
+    }
+
     private StackPanel CreateTimesheetsTable(List<WorkEntry> entries, TableSelection<WorkEntry> selectedEntries)
     {
       StackPanel table = new();
@@ -2580,7 +2656,7 @@ namespace TimeTracker
       return table;
     }
 
-    private static UIElement CreateTimesheetsTableHeader(TableSelection<WorkEntry> selectedEntries)
+    private UIElement CreateTimesheetsTableHeader(TableSelection<WorkEntry> selectedEntries)
     {
       Grid header = CreateTimesheetsTableGrid();
       header.Background = BrushFromHex("#F8FAFC");
@@ -2595,14 +2671,36 @@ namespace TimeTracker
       Grid.SetColumn(selectorHeader, 0);
       header.Children.Add(selectorHeader);
 
-      header.Children.Add(CreateJobsHeaderCell("Client", 1));
-      header.Children.Add(CreateJobsHeaderCell("Project", 2));
-      header.Children.Add(CreateJobsHeaderCell("Start", 3));
-      header.Children.Add(CreateJobsHeaderCell("Duration", 4));
-      header.Children.Add(CreateJobsHeaderCell("Rate", 5));
-      header.Children.Add(CreateJobsHeaderCell("Billable", 6));
+      header.Children.Add(CreateTimesheetsHeaderCell("Client", 1, TimesheetSortColumn.Client));
+      header.Children.Add(CreateTimesheetsHeaderCell("Project", 2, TimesheetSortColumn.Project));
+      header.Children.Add(CreateTimesheetsHeaderCell("Start", 3, TimesheetSortColumn.Start));
+      header.Children.Add(CreateTimesheetsHeaderCell("Duration", 4, TimesheetSortColumn.Duration));
+      header.Children.Add(CreateTimesheetsHeaderCell("Rate", 5, TimesheetSortColumn.Rate));
+      header.Children.Add(CreateTimesheetsHeaderCell("Billable", 6, TimesheetSortColumn.Billable));
       header.Children.Add(CreateJobsHeaderCell("Actions", 7));
       return header;
+    }
+
+    private UIElement CreateTimesheetsHeaderCell(string text, int column, TimesheetSortColumn sortColumn)
+    {
+      bool isActiveSort = timesheetSortColumn == sortColumn;
+      string arrow = timesheetSortDirection == ListSortDirection.Ascending ? " ▲" : " ▼";
+
+      Button cell = new()
+      {
+        Content = isActiveSort ? text + arrow : text,
+        ToolTip = $"Sort by {text.ToLower(CultureInfo.CurrentCulture)}"
+      };
+      ApplyStyle(cell, "ColumnHeaderButtonStyle");
+
+      if (isActiveSort)
+      {
+        cell.Foreground = AccentBrush;
+      }
+
+      cell.Click += (_, _) => SortTimesheetsBy(sortColumn);
+      Grid.SetColumn(cell, column);
+      return cell;
     }
 
     private UIElement CreateTimesheetTableRow(WorkEntry entry, TableSelection<WorkEntry> selectedEntries)

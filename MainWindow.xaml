@@ -256,6 +256,42 @@
       <Setter Property="FontSize" Value="13" />
     </Style>
 
+    <!-- A sortable table column header: reads as plain header text, but is a real Button so it
+         reports an Invoke pattern to automation. Deliberately not based on AppButtonBaseStyle,
+         which brings a border, a fixed height and a MinWidth that a header cell must not have. -->
+    <Style x:Key="ColumnHeaderButtonStyle" TargetType="Button">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Padding" Value="16,12,8,12" />
+      <Setter Property="Margin" Value="0" />
+      <Setter Property="MinWidth" Value="0" />
+      <Setter Property="MinHeight" Value="0" />
+      <Setter Property="HorizontalContentAlignment" Value="Left" />
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border
+              x:Name="HeaderChrome"
+              Background="{TemplateBinding Background}"
+              Padding="{TemplateBinding Padding}">
+              <ContentPresenter
+                HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                VerticalAlignment="Center" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="HeaderChrome" Property="Background" Value="#EAF4FF" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
     <Style x:Key="PanelBorderStyle" TargetType="Border">
       <Setter Property="Background" Value="{StaticResource PanelBrush}" />
       <Setter Property="BorderBrush" Value="{StaticResource PanelBorderBrush}" />

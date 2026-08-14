@@ -24,6 +24,10 @@ namespace TimeTracker.Models
     private DateTime? _lastLongRunningWarningTime;
     private bool _isShowingLongRunningPrompt;
     private DateTime _lastRunningWorkSaveTime = DateTime.MinValue;
+    private readonly DispatcherTimer _idleTimer = new() { Interval = TimeSpan.FromSeconds(30) };
+    private DateTime? _promptedIdleStartedAt;
+    private bool _isShowingIdlePrompt;
+    private bool _isPersistenceSuspended;
 
     /// <summary>
     /// How often a running job is written to disk by the timer. Starting, stopping and editing
@@ -31,10 +35,18 @@ namespace TimeTracker.Models
     /// </summary>
     private static readonly TimeSpan RunningWorkSaveInterval = TimeSpan.FromSeconds(60);
 
+    /// <summary>
+    /// How far the start of an idle stretch may appear to move and still count as the same stretch.
+    /// It is computed as "now minus the idle time", so consecutive polls differ by a few
+    /// milliseconds of timer jitter while a genuinely new stretch starts minutes later.
+    /// </summary>
+    private static readonly TimeSpan IdleStretchTolerance = TimeSpan.FromSeconds(5);
+
     private TimeTrackerModel()
     {
       _workTimer = new() { Interval = TimeSpan.FromSeconds(TTAppSettings.Instance.TimerInterval) };
       _workTimer.Tick += WorkTimer_Tick;
+      _idleTimer.Tick += IdleTimer_Tick;
 
       LiteDbTimeTrackerStore.CreateDailyBackup();
       LoadData();
@@ -71,8 +83,128 @@ namespace TimeTracker.Models
       }
     }
 
+    private void IdleTimer_Tick(object? sender, EventArgs e)
+    {
+      CheckIdlePolicy();
+    }
+
+    /// <summary>
+    /// Asks about a stretch of machine idle time once, and folds it into the job's paused total if
+    /// the user says to discard it. The job keeps running either way: idle time is time the clock
+    /// should not have been billing, not a reason to end the work.
+    /// </summary>
+    private void CheckIdlePolicy()
+    {
+      TTAppSettings settings = TTAppSettings.Instance;
+
+      // A paused job is already not billing the time, and stacking this on top of the long running
+      // prompt would leave the user answering two dialogs about the same minutes.
+      if (_currentWorkEntry == null
+        || !settings.IdleDetectionEnabled
+        || _currentWorkEntry.IsPaused
+        || _isShowingLongRunningPrompt
+        || _isShowingIdlePrompt)
+      {
+        return;
+      }
+
+      DateTime now = DateTime.Now;
+      TimeSpan idleTime = IdleTime.GetIdleTime();
+
+      if (!IdlePolicy.ShouldPrompt(idleTime, _currentWorkEntry.StartTime, now, settings.IdleThresholdMinutes))
+      {
+        return;
+      }
+
+      DateTime idleStartedAt = IdlePolicy.IdleStartedAt(idleTime, now);
+
+      // ShouldPrompt stays true on every poll until input resumes, so the same quiet stretch would
+      // otherwise be raised every thirty seconds. A new stretch can only begin later than the one
+      // already answered.
+      if (_promptedIdleStartedAt.HasValue && idleStartedAt - _promptedIdleStartedAt.Value <= IdleStretchTolerance)
+      {
+        return;
+      }
+
+      DateTime cutoff = IdlePolicy.Cutoff(idleTime, _currentWorkEntry.StartTime, now);
+      _promptedIdleStartedAt = idleStartedAt;
+
+      WorkEntry idleWorkEntry = _currentWorkEntry;
+      IdleDetectedEventArgs args = new(idleWorkEntry, now - cutoff, cutoff);
+
+      // The listener is expected to block on a modal prompt while the timers keep ticking, so
+      // re-entry is blocked until it returns.
+      _isShowingIdlePrompt = true;
+      try
+      {
+        IdleDetected?.Invoke(this, args);
+      }
+      finally
+      {
+        _isShowingIdlePrompt = false;
+      }
+
+      if (args.DiscardIdleTime)
+      {
+        DiscardIdleTime(idleWorkEntry, cutoff);
+      }
+    }
+
+    /// <summary>
+    /// Takes the idle stretch off the job's billable time by adding it to the paused total, which
+    /// leaves the start and end times as a plain record of when the work happened.
+    /// </summary>
+    private void DiscardIdleTime(WorkEntry workEntry, DateTime cutoff)
+    {
+      // The prompt may have sat unanswered for hours, all of it still idle. Measuring the end of
+      // the stretch now — the moment input resumed — discards the whole absence rather than the
+      // part of it that had elapsed when the question was asked.
+      DateTime resumedAt = IdlePolicy.IdleStartedAt(IdleTime.GetIdleTime(), DateTime.Now);
+
+      if (resumedAt < cutoff)
+      {
+        resumedAt = cutoff;
+      }
+
+      TimeSpan idleSpan = resumedAt - cutoff;
+
+      if (idleSpan <= TimeSpan.Zero)
+      {
+        return;
+      }
+
+      workEntry.PausedDuration += idleSpan;
+
+      SaveData();
+      RunningWorkChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Stops this instance writing to the database for the rest of its life. Used when the file has
+    /// been replaced from a backup: everything held here belongs to the data that was just
+    /// replaced, and the timer would happily put it back.
+    /// </summary>
+    public void SuspendPersistence()
+    {
+      _isPersistenceSuspended = true;
+    }
+
+    /// <summary>
+    /// Allows saving again after a suspension that turned out not to be needed — a restore that
+    /// failed leaves this session's data as the only good copy there is.
+    /// </summary>
+    public void ResumePersistence()
+    {
+      _isPersistenceSuspended = false;
+    }
+
     private void SaveData()
     {
+      if (_isPersistenceSuspended)
+      {
+        return;
+      }
+
       _data.Clients = _clients;
       _data.Reports = _reports;
       _data.Invoices = _invoices;
@@ -354,6 +486,12 @@ namespace TimeTracker.Models
     /// </summary>
     public event EventHandler<LongRunningJobEventArgs>? LongRunningJobDetected;
 
+    /// <summary>
+    /// Raised once per idle stretch while a job is running. The UI handles this by prompting; with
+    /// no handler the idle time is kept, which is what the timer would have recorded anyway.
+    /// </summary>
+    public event EventHandler<IdleDetectedEventArgs>? IdleDetected;
+
     public void StartWork(WorkEntry workEntry)
     {
       if (_currentWorkEntry != null)
@@ -364,9 +502,11 @@ namespace TimeTracker.Models
       _currentWorkEntry = workEntry;
       _currentWorkEntry.IsRunning = true;
       _lastLongRunningWarningTime = null;
+      _promptedIdleStartedAt = null;
       _lastRunningWorkSaveTime = DateTime.Now;
 
       _workTimer.Start();
+      _idleTimer.Start();
 
       SaveData();
       RunningWorkChanged?.Invoke(this, EventArgs.Empty);
@@ -448,8 +588,10 @@ namespace TimeTracker.Models
       }
 
       _workTimer.Stop();
+      _idleTimer.Stop();
       _currentWorkEntry = null;
       _lastLongRunningWarningTime = null;
+      _promptedIdleStartedAt = null;
       _lastRunningWorkSaveTime = DateTime.MinValue;
 
       SaveData();
@@ -574,8 +716,8 @@ namespace TimeTracker.Models
         StartDate = startDate.Date,
         EndDate = endDate.Date,
         WorkEntryIDs = selectedJobs.Select(workEntry => workEntry.ID).ToList(),
-        HoursTotal = CalculateHoursTotal(selectedJobs),
-        Total = CalculateTotal(selectedJobs),
+        HoursTotal = CalculateBilledHoursTotal(selectedJobs),
+        Total = CalculateBilledTotal(selectedJobs),
         Currency = GetCurrencySummary(selectedJobs),
         CreatedAt = DateTime.Now
       };
@@ -614,6 +756,57 @@ namespace TimeTracker.Models
     public static decimal CalculateTotal(IEnumerable<WorkEntry> workEntries)
     {
       return workEntries.Sum(workEntry => Convert.ToDecimal(workEntry.Duration.TotalHours) * workEntry.HourlyRate);
+    }
+
+    /// <summary>
+    /// The time a job is billed for: its tracked duration rounded to the client's granularity, or
+    /// the application default where the client does not set its own. Rounding is a billing
+    /// decision, so only invoices use this — reports and the dashboard show what was tracked.
+    /// </summary>
+    public static TimeSpan GetBilledDuration(WorkEntry workEntry)
+    {
+      TTAppSettings settings = TTAppSettings.Instance;
+
+      return GetBilledDuration(workEntry, settings.DefaultRoundingMode, settings.DefaultRoundingMinutes);
+    }
+
+    /// <summary>
+    /// The application defaults are parameters here so the rule can be exercised without the
+    /// settings singleton, which reads the signed-in user's file.
+    /// </summary>
+    public static TimeSpan GetBilledDuration(WorkEntry workEntry, BillingRoundingMode defaultMode, int defaultMinutes)
+    {
+      Client? client = workEntry.Project?.Client;
+
+      return BillingRounding.RoundForClient(
+        workEntry.Duration,
+        client?.RoundingMode,
+        client?.RoundingMinutes,
+        defaultMode,
+        defaultMinutes);
+    }
+
+    public static decimal CalculateBilledTotal(IEnumerable<WorkEntry> workEntries)
+    {
+      return workEntries.Sum(workEntry => Convert.ToDecimal(GetBilledDuration(workEntry).TotalHours) * workEntry.HourlyRate);
+    }
+
+    public static double CalculateBilledHoursTotal(IEnumerable<WorkEntry> workEntries)
+    {
+      return workEntries.Sum(workEntry => GetBilledDuration(workEntry).TotalHours);
+    }
+
+    /// <summary>
+    /// The billed equivalent of <see cref="CalculateTotalsByCurrency" />, for the places that are
+    /// quoting what will actually be charged.
+    /// </summary>
+    public static IReadOnlyList<(string Currency, decimal Total)> CalculateBilledTotalsByCurrency(IEnumerable<WorkEntry> workEntries)
+    {
+      return workEntries
+        .GroupBy(workEntry => string.IsNullOrWhiteSpace(workEntry.Currency) ? string.Empty : workEntry.Currency.Trim())
+        .Select(group => (Currency: group.Key, Total: CalculateBilledTotal(group)))
+        .OrderByDescending(currencyTotal => currencyTotal.Total)
+        .ToList();
     }
 
     /// <summary>
@@ -689,8 +882,10 @@ namespace TimeTracker.Models
       if (_currentWorkEntry == workEntry)
       {
         _workTimer.Stop();
+        _idleTimer.Stop();
         _currentWorkEntry = null;
         _lastLongRunningWarningTime = null;
+        _promptedIdleStartedAt = null;
         RunningWorkChanged?.Invoke(this, EventArgs.Empty);
       }
 
@@ -746,7 +941,11 @@ namespace TimeTracker.Models
       UpdateWorkEntry(workEntry, project, startTime, description, hourlyRate, currency, duration);
     }
 
-    public void UpdateClient(Client client, string name, string address, string companyName = "", string email = "", string phone = "", string invoiceNumberPrefix = "", int currentInvoiceNumber = 1, decimal defaultHourlyRate = 0, string defaultCurrency = "")
+    /// <summary>
+    /// A null <paramref name="roundingMode" /> or <paramref name="roundingMinutes" /> means the
+    /// client inherits that part of the application's billing default.
+    /// </summary>
+    public void UpdateClient(Client client, string name, string address, string companyName = "", string email = "", string phone = "", string invoiceNumberPrefix = "", int currentInvoiceNumber = 1, decimal defaultHourlyRate = 0, string defaultCurrency = "", BillingRoundingMode? roundingMode = null, int? roundingMinutes = null)
     {
       client.Name = name;
       client.Address = address;
@@ -756,6 +955,8 @@ namespace TimeTracker.Models
       client.InvoiceNumberPrefix = invoiceNumberPrefix;
       client.CurrentInvoiceNumber = currentInvoiceNumber;
       client.DefaultHourlyRate = defaultHourlyRate;
+      client.RoundingMode = roundingMode;
+      client.RoundingMinutes = roundingMinutes;
       client.DefaultCurrency = string.IsNullOrWhiteSpace(defaultCurrency)
         ? TTAppSettings.Instance.DefaultCurrency
         : TTAppSettings.NormalizeCurrency(defaultCurrency);
@@ -817,8 +1018,10 @@ namespace TimeTracker.Models
         if (_currentWorkEntry == workEntry)
         {
           _workTimer.Stop();
+          _idleTimer.Stop();
           _currentWorkEntry = null;
           _lastLongRunningWarningTime = null;
+          _promptedIdleStartedAt = null;
           RunningWorkChanged?.Invoke(this, EventArgs.Empty);
         }
 

@@ -1,5 +1,8 @@
 using System;
+using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 using LiteDB;
 using TimeTracker.Models;
@@ -12,6 +15,8 @@ namespace TimeTracker.Services
     private const string DataCollectionName = "app_data";
     private const string DataRecordID = "main";
     private const int BackupsToKeep = 10;
+    private const string DailyBackupPrefix = "tt_data-";
+    private const string BeforeRestoreBackupPrefix = "tt_data-before-restore-";
 
     public TimeTrackerData LoadData()
     {
@@ -87,10 +92,96 @@ namespace TimeTracker.Services
       }
     }
 
+    /// <summary>
+    /// The backups on disk, newest first. Both the daily copies and the safety copies taken before
+    /// a restore are listed: either is something the user may want back.
+    /// </summary>
+    public static IReadOnlyList<BackupFile> GetBackups()
+    {
+      string backupFolder = GetBackupFolderPath();
+
+      if (!Directory.Exists(backupFolder))
+      {
+        return Array.Empty<BackupFile>();
+      }
+
+      List<BackupFile> backups = new();
+
+      foreach (string backupPath in Directory.GetFiles(backupFolder, "tt_data-*.db"))
+      {
+        FileInfo fileInfo = new(backupPath);
+        backups.Add(new BackupFile(backupPath, GetBackupTimestamp(fileInfo), fileInfo.Length));
+      }
+
+      backups.Sort((left, right) => right.TakenAt.CompareTo(left.TakenAt));
+
+      return backups;
+    }
+
+    /// <summary>
+    /// Puts <paramref name="backupPath" /> back in place of the live database, after copying the
+    /// current database aside so the restore itself can be undone. The caller is expected to close
+    /// the application afterwards: the running instance holds the old data in memory and would
+    /// write it straight back over the restored file.
+    /// </summary>
+    /// <returns>The safety copy written, or null when there was no database to copy aside.</returns>
+    public static string? RestoreFromBackup(string backupPath)
+    {
+      if (!File.Exists(backupPath))
+      {
+        throw new FileNotFoundException("The backup file no longer exists.", backupPath);
+      }
+
+      string databaseFile = GetDatabaseFilePath();
+      string backupFolder = GetBackupFolderPath();
+      Directory.CreateDirectory(backupFolder);
+
+      string? safetyCopyPath = null;
+
+      if (File.Exists(databaseFile))
+      {
+        safetyCopyPath = Path.Combine(backupFolder, $"tt_data-before-restore-{DateTime.Now:yyyyMMdd-HHmmss}.db");
+        File.Copy(databaseFile, safetyCopyPath, true);
+      }
+
+      File.Copy(backupPath, databaseFile, true);
+
+      return safetyCopyPath;
+    }
+
+    /// <summary>
+    /// When a backup was taken, read from its name where possible so that copying files around
+    /// cannot rewrite the history. File.Copy carries the source's write time over, so the file
+    /// system alone would date a daily backup by when the data was last saved.
+    /// </summary>
+    private static DateTime GetBackupTimestamp(FileInfo fileInfo)
+    {
+      string name = Path.GetFileNameWithoutExtension(fileInfo.Name);
+
+      if (name.StartsWith(BeforeRestoreBackupPrefix, StringComparison.OrdinalIgnoreCase)
+        && DateTime.TryParseExact(name[BeforeRestoreBackupPrefix.Length..], "yyyyMMdd-HHmmss", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime takenAt))
+      {
+        return takenAt;
+      }
+
+      if (name.StartsWith(DailyBackupPrefix, StringComparison.OrdinalIgnoreCase)
+        && DateTime.TryParseExact(name[DailyBackupPrefix.Length..], "yyyyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime takenOn))
+      {
+        return takenOn;
+      }
+
+      return fileInfo.LastWriteTime;
+    }
+
     private static void PruneBackups(string backupFolder)
     {
+      // Only the daily copies are on a rota. The copy taken before a restore is the undo for that
+      // restore, so it stays until the user clears it out themselves.
+      string[] backups = Directory.GetFiles(backupFolder, "tt_data-*.db")
+        .Where(IsDailyBackup)
+        .ToArray();
+
       // Dated names sort chronologically, so the newest are simply the last by name.
-      string[] backups = Directory.GetFiles(backupFolder, "tt_data-*.db");
       Array.Sort(backups, StringComparer.OrdinalIgnoreCase);
 
       for (int index = 0; index < backups.Length - BackupsToKeep; index++)
@@ -106,6 +197,18 @@ namespace TimeTracker.Services
         {
         }
       }
+    }
+
+    /// <summary>
+    /// A daily copy, whose name is the prefix followed by a plain date. Anything else in the folder
+    /// — the copies taken before a restore — is not part of the rota.
+    /// </summary>
+    private static bool IsDailyBackup(string backupPath)
+    {
+      string name = Path.GetFileNameWithoutExtension(backupPath);
+
+      return name.StartsWith(DailyBackupPrefix, StringComparison.OrdinalIgnoreCase)
+        && DateTime.TryParseExact(name[DailyBackupPrefix.Length..], "yyyyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _);
     }
 
     public static string GetBackupFolderPath()
@@ -168,6 +271,27 @@ namespace TimeTracker.Services
       }
 
       return dataFolder;
+    }
+
+    /// <summary>
+    /// One file in the backup folder, as the settings page needs to describe it.
+    /// </summary>
+    public sealed class BackupFile
+    {
+      public BackupFile(string filePath, DateTime takenAt, long sizeBytes)
+      {
+        FilePath = filePath;
+        TakenAt = takenAt;
+        SizeBytes = sizeBytes;
+      }
+
+      public string FilePath { get; }
+
+      public string FileName => Path.GetFileName(FilePath);
+
+      public DateTime TakenAt { get; }
+
+      public long SizeBytes { get; }
     }
 
     private sealed class AppDataRecord

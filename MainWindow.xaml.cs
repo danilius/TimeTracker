@@ -62,6 +62,7 @@ namespace TimeTracker
     private TimesheetSortColumn timesheetSortColumn = TimesheetSortColumn.Start;
     private ListSortDirection timesheetSortDirection = ListSortDirection.Descending;
     private string jobsSearchTerm = string.Empty;
+    private bool isRestoringBackup;
     private JobsFilterMode jobsFilterMode = JobsFilterMode.All;
     private TextBlock? jobsActiveTimerTextBlock;
     private TextBlock? jobsRecentSubtitleTextBlock;
@@ -79,6 +80,7 @@ namespace TimeTracker
 
       timeTracker.RunningWorkChanged += TimeTracker_RunningWorkChanged;
       timeTracker.LongRunningJobDetected += TimeTracker_LongRunningJobDetected;
+      timeTracker.IdleDetected += TimeTracker_IdleDetected;
       jobsPageTimer.Tick += JobsPageTimer_Tick;
       SourceInitialized += MainWindow_SourceInitialized;
 
@@ -107,6 +109,23 @@ namespace TimeTracker
       dialog.ShowDialog();
 
       e.ContinueRunning = dialog.ContinueRequested;
+    }
+
+    /// <summary>
+    /// Asks whether idle time should be billed. Blocking here is intended: the model waits for the
+    /// answer before deciding what to do with the idle stretch.
+    /// </summary>
+    private void TimeTracker_IdleDetected(object? sender, IdleDetectedEventArgs e)
+    {
+      BringToFront();
+
+      IdleTimeDialog dialog = new(e.WorkEntry, e.IdleDuration, e.Cutoff)
+      {
+        Owner = this
+      };
+      dialog.ShowDialog();
+
+      e.DiscardIdleTime = dialog.DiscardRequested;
     }
 
     private void BringToFront()
@@ -2598,8 +2617,20 @@ namespace TimeTracker
     /// </summary>
     private static string FormatTotalsByCurrency(IEnumerable<WorkEntry> workEntries)
     {
-      IReadOnlyList<(string Currency, decimal Total)> totals = TimeTrackerModel.CalculateTotalsByCurrency(workEntries);
+      return FormatTotals(TimeTrackerModel.CalculateTotalsByCurrency(workEntries));
+    }
 
+    /// <summary>
+    /// The same figures with billing rounding applied, for the places that quote what a client will
+    /// actually be charged.
+    /// </summary>
+    private static string FormatBilledTotalsByCurrency(IEnumerable<WorkEntry> workEntries)
+    {
+      return FormatTotals(TimeTrackerModel.CalculateBilledTotalsByCurrency(workEntries));
+    }
+
+    private static string FormatTotals(IReadOnlyList<(string Currency, decimal Total)> totals)
+    {
       return totals.Count == 0
         ? "0.00"
         : string.Join(" + ", totals.Select(currencyTotal => $"{currencyTotal.Currency} {currencyTotal.Total:0.00}".Trim()));
@@ -3519,6 +3550,7 @@ namespace TimeTracker
         client?.CompanyName ?? string.Empty,
         client?.Address ?? string.Empty,
         invoice.IssueDate,
+        true,
         TTAppSettings.Instance.WordTemplatePath);
 
       TTAppSettings.Instance.LastInvoiceFolder = Path.GetDirectoryName(filePath) ?? string.Empty;
@@ -3544,6 +3576,7 @@ namespace TimeTracker
         string.Empty,
         string.Empty,
         null,
+        false,
         TTAppSettings.Instance.ReportTemplatePath,
         "ReportTemplateExample.docx");
 
@@ -3608,7 +3641,11 @@ namespace TimeTracker
       TTAppSettings.Instance.Save();
     }
 
-    private static void SaveJobsWordDocument(string filePath, string title, IEnumerable<WorkEntry> jobs, DateTime startDate, DateTime endDate, string clientName, string clientCompany, string clientAddress, DateTime? issueDate, string configuredTemplatePath, string fallbackTemplateName = "InvoiceTemplateExample.docx")
+    /// <summary>
+    /// <paramref name="useBilledDuration" /> rounds each job to its billing granularity, which an
+    /// invoice does and a report does not.
+    /// </summary>
+    private static void SaveJobsWordDocument(string filePath, string title, IEnumerable<WorkEntry> jobs, DateTime startDate, DateTime endDate, string clientName, string clientCompany, string clientAddress, DateTime? issueDate, bool useBilledDuration, string configuredTemplatePath, string fallbackTemplateName = "InvoiceTemplateExample.docx")
     {
       string templatePath = ResolveWordTemplatePath(configuredTemplatePath, fallbackTemplateName);
 
@@ -3616,9 +3653,9 @@ namespace TimeTracker
       {
         File.Copy(templatePath, filePath, true);
         using ZipArchive archive = ZipFile.Open(filePath, ZipArchiveMode.Update);
-        string templateDocumentXml = ReadZipEntry(archive, "word/document.xml") ?? CreateJobsWordDocumentXml(title, jobs, startDate, endDate, clientName, issueDate);
+        string templateDocumentXml = ReadZipEntry(archive, "word/document.xml") ?? CreateJobsWordDocumentXml(title, jobs, startDate, endDate, clientName, issueDate, useBilledDuration);
         ReplaceZipEntry(archive, "docProps/core.xml", CreateCorePropertiesXml(title));
-        ReplaceZipEntry(archive, "word/document.xml", FillTemplateWordDocumentXml(templateDocumentXml, title, jobs, startDate, endDate, clientName, clientCompany, clientAddress, issueDate));
+        ReplaceZipEntry(archive, "word/document.xml", FillTemplateWordDocumentXml(templateDocumentXml, title, jobs, startDate, endDate, clientName, clientCompany, clientAddress, issueDate, useBilledDuration));
         return;
       }
 
@@ -3627,7 +3664,7 @@ namespace TimeTracker
       ReplaceZipEntry(newArchive, "_rels/.rels", CreatePackageRelationshipsXml());
       ReplaceZipEntry(newArchive, "docProps/core.xml", CreateCorePropertiesXml(title));
       ReplaceZipEntry(newArchive, "word/_rels/document.xml.rels", CreateDocumentRelationshipsXml());
-      ReplaceZipEntry(newArchive, "word/document.xml", CreateJobsWordDocumentXml(title, jobs, startDate, endDate, clientName, issueDate));
+      ReplaceZipEntry(newArchive, "word/document.xml", CreateJobsWordDocumentXml(title, jobs, startDate, endDate, clientName, issueDate, useBilledDuration));
       ReplaceZipEntry(newArchive, "word/styles.xml", CreateStylesXml());
     }
 
@@ -3687,7 +3724,7 @@ namespace TimeTracker
       writer.Write(content);
     }
 
-    private static string CreateJobsWordDocumentXml(string title, IEnumerable<WorkEntry> jobs, DateTime startDate, DateTime endDate, string clientName, DateTime? issueDate)
+    private static string CreateJobsWordDocumentXml(string title, IEnumerable<WorkEntry> jobs, DateTime startDate, DateTime endDate, string clientName, DateTime? issueDate, bool useBilledDuration)
     {
       List<WorkEntry> jobList = jobs.ToList();
       StringBuilder body = new();
@@ -3703,9 +3740,17 @@ namespace TimeTracker
       }
       body.Append(Paragraph($"Period: {FormatDate(startDate)} to {FormatDate(endDate)}"));
       body.Append(Paragraph(""));
-      body.Append(CreateLineItemsTableXml(jobList));
-      body.Append(Paragraph($"Hours total: {TimeTrackerModel.CalculateHoursTotal(jobList):0.##}", "Total"));
-      body.Append(Paragraph($"Total: {TimeTrackerModel.GetCurrencySummary(jobList)} {TimeTrackerModel.CalculateTotal(jobList):0.00}", "Total"));
+      body.Append(CreateLineItemsTableXml(jobList, useBilledDuration));
+
+      double bodyHoursTotal = useBilledDuration
+        ? TimeTrackerModel.CalculateBilledHoursTotal(jobList)
+        : TimeTrackerModel.CalculateHoursTotal(jobList);
+      decimal bodyTotal = useBilledDuration
+        ? TimeTrackerModel.CalculateBilledTotal(jobList)
+        : TimeTrackerModel.CalculateTotal(jobList);
+
+      body.Append(Paragraph($"Hours total: {bodyHoursTotal:0.##}", "Total"));
+      body.Append(Paragraph($"Total: {TimeTrackerModel.GetCurrencySummary(jobList)} {bodyTotal:0.00}", "Total"));
 
       return "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
         "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">" +
@@ -3713,14 +3758,18 @@ namespace TimeTracker
         "</w:document>";
     }
 
-    private static string FillTemplateWordDocumentXml(string documentXml, string title, IEnumerable<WorkEntry> jobs, DateTime startDate, DateTime endDate, string clientName, string clientCompany, string clientAddress, DateTime? issueDate)
+    private static string FillTemplateWordDocumentXml(string documentXml, string title, IEnumerable<WorkEntry> jobs, DateTime startDate, DateTime endDate, string clientName, string clientCompany, string clientAddress, DateTime? issueDate, bool useBilledDuration)
     {
       List<WorkEntry> jobList = jobs.ToList();
       string invoiceNumber = title.StartsWith("Invoice ", StringComparison.OrdinalIgnoreCase) ? title["Invoice ".Length..] : title;
       string currency = TimeTrackerModel.GetCurrencySummary(jobList);
-      string invoiceTotal = TimeTrackerModel.CalculateTotal(jobList).ToString("0.00");
-      string hoursTotal = TimeTrackerModel.CalculateHoursTotal(jobList).ToString("0.##");
-      string lineItemsXml = CreateLineItemsTableXml(jobList);
+      string invoiceTotal = (useBilledDuration
+        ? TimeTrackerModel.CalculateBilledTotal(jobList)
+        : TimeTrackerModel.CalculateTotal(jobList)).ToString("0.00");
+      string hoursTotal = (useBilledDuration
+        ? TimeTrackerModel.CalculateBilledHoursTotal(jobList)
+        : TimeTrackerModel.CalculateHoursTotal(jobList)).ToString("0.##");
+      string lineItemsXml = CreateLineItemsTableXml(jobList, useBilledDuration);
       List<string> projectNames = jobList.Select(job => job.ProjectName).Where(name => !string.IsNullOrWhiteSpace(name)).Distinct().ToList();
       string projectName = projectNames.Count == 1 ? projectNames[0] : "Multiple projects";
 
@@ -3740,7 +3789,7 @@ namespace TimeTracker
         ["HoursTotal"] = hoursTotal
       };
 
-      string filledXml = ReplaceLineItemTemplateRows(documentXml, jobList);
+      string filledXml = ReplaceLineItemTemplateRows(documentXml, jobList, useBilledDuration);
       filledXml = ReplaceParagraphPlaceholders(filledXml, replacements);
 
       foreach ((string key, string value) in replacements)
@@ -3757,13 +3806,13 @@ namespace TimeTracker
 
       if (!filledXml.Contains("{{LineItems}}") && filledXml == documentXml)
       {
-        return CreateJobsWordDocumentXml(title, jobList, startDate, endDate, clientName, issueDate);
+        return CreateJobsWordDocumentXml(title, jobList, startDate, endDate, clientName, issueDate, useBilledDuration);
       }
 
       return filledXml;
     }
 
-    private static string ReplaceLineItemTemplateRows(string documentXml, IReadOnlyList<WorkEntry> jobs)
+    private static string ReplaceLineItemTemplateRows(string documentXml, IReadOnlyList<WorkEntry> jobs, bool useBilledDuration)
     {
       return Regex.Replace(
         documentXml,
@@ -3780,13 +3829,14 @@ namespace TimeTracker
           StringBuilder rows = new();
           foreach (WorkEntry job in jobs)
           {
-            decimal lineTotal = Convert.ToDecimal(job.Duration.TotalHours) * job.HourlyRate;
+            TimeSpan duration = DocumentDuration(job, useBilledDuration);
+            decimal lineTotal = Convert.ToDecimal(duration.TotalHours) * job.HourlyRate;
             Dictionary<string, string> replacements = new()
             {
               ["ItemDate"] = FormatDate(job.StartTime),
               ["ProjectName"] = job.ProjectName,
               ["Description"] = job.Description ?? string.Empty,
-              ["Hours"] = job.Duration.TotalHours.ToString("0.##"),
+              ["Hours"] = duration.TotalHours.ToString("0.##"),
               ["Rate"] = $"{job.Currency} {job.HourlyRate:0.##}",
               ["LineTotal"] = $"{job.Currency} {lineTotal:0.00}"
             };
@@ -3887,7 +3937,16 @@ namespace TimeTracker
         RegexOptions.Singleline);
     }
 
-    private static string CreateLineItemsTableXml(IEnumerable<WorkEntry> jobs)
+    /// <summary>
+    /// The billed duration is the tracked duration rounded to the client's granularity. Only the
+    /// billing documents use it; a report states what was tracked.
+    /// </summary>
+    private static TimeSpan DocumentDuration(WorkEntry job, bool useBilledDuration)
+    {
+      return useBilledDuration ? TimeTrackerModel.GetBilledDuration(job) : job.Duration;
+    }
+
+    private static string CreateLineItemsTableXml(IEnumerable<WorkEntry> jobs, bool useBilledDuration)
     {
       StringBuilder table = new();
       table.Append("<w:tbl>");
@@ -3897,14 +3956,15 @@ namespace TimeTracker
 
       foreach (WorkEntry job in jobs)
       {
-        decimal lineTotal = Convert.ToDecimal(job.Duration.TotalHours) * job.HourlyRate;
+        TimeSpan duration = DocumentDuration(job, useBilledDuration);
+        decimal lineTotal = Convert.ToDecimal(duration.TotalHours) * job.HourlyRate;
         table.Append(TableRow(new[]
         {
           FormatDateTime(job.StartTime),
           job.ClientName,
           job.ProjectName,
           job.Description ?? string.Empty,
-          job.Duration.TotalHours.ToString("0.##"),
+          duration.TotalHours.ToString("0.##"),
           $"{job.Currency} {job.HourlyRate:0.##}",
           $"{job.Currency} {lineTotal:0.00}"
         }, false));
@@ -4199,22 +4259,28 @@ namespace TimeTracker
     private static void UpdateInvoiceSelectionTotal(List<InvoiceJobSelection> jobs, TextBlock totalTextBlock)
     {
       List<WorkEntry> selectedJobs = jobs.Where(job => job.IsIncluded).Select(job => job.WorkEntry).ToList();
-      totalTextBlock.Text = $"Total: {FormatTotalsByCurrency(selectedJobs)}";
+      totalTextBlock.Text = $"Total: {FormatBilledTotalsByCurrency(selectedJobs)}";
     }
 
     private void PrintReport(Report report)
     {
-      PrintFlowDocument(CreateJobsDocument(report.Name, timeTracker.GetReportJobs(report), report.StartDate, report.EndDate));
+      // A report is a record of what was tracked, so it never rounds: rounding is a billing
+      // decision and belongs to invoices alone.
+      PrintFlowDocument(CreateJobsDocument(report.Name, timeTracker.GetReportJobs(report), report.StartDate, report.EndDate, false));
     }
 
     private void PrintInvoice(Invoice invoice)
     {
       Client? client = timeTracker.FindClient(invoice.ClientID);
       string title = $"{invoice.InvoiceNumber} - {client?.Name ?? "Client"}";
-      PrintFlowDocument(CreateJobsDocument(title, timeTracker.GetInvoiceJobs(invoice), invoice.StartDate, invoice.EndDate));
+      PrintFlowDocument(CreateJobsDocument(title, timeTracker.GetInvoiceJobs(invoice), invoice.StartDate, invoice.EndDate, true));
     }
 
-    private static FlowDocument CreateJobsDocument(string title, IEnumerable<WorkEntry> jobs, DateTime startDate, DateTime endDate)
+    /// <summary>
+    /// <paramref name="useBilledDuration" /> rounds each job to its billing granularity, which an
+    /// invoice does and a report does not.
+    /// </summary>
+    private static FlowDocument CreateJobsDocument(string title, IEnumerable<WorkEntry> jobs, DateTime startDate, DateTime endDate, bool useBilledDuration)
     {
       List<WorkEntry> jobList = jobs.ToList();
       FlowDocument document = new()
@@ -4247,23 +4313,31 @@ namespace TimeTracker
 
       foreach (WorkEntry job in jobList)
       {
+        TimeSpan duration = DocumentDuration(job, useBilledDuration);
         TableRow row = new();
         rowGroup.Rows.Add(row);
         AddCell(row, FormatDateTime(job.StartTime), false);
         AddCell(row, job.ClientName, false);
         AddCell(row, job.ProjectName, false);
         AddCell(row, job.Description ?? string.Empty, false);
-        AddCell(row, job.Duration.TotalHours.ToString("0.##"), false);
-        AddCell(row, $"{job.Currency} {(Convert.ToDecimal(job.Duration.TotalHours) * job.HourlyRate):0.00}", false);
+        AddCell(row, duration.TotalHours.ToString("0.##"), false);
+        AddCell(row, $"{job.Currency} {(Convert.ToDecimal(duration.TotalHours) * job.HourlyRate):0.00}", false);
       }
 
-      document.Blocks.Add(new Paragraph(new Run($"Total: {TimeTrackerModel.GetCurrencySummary(jobList)} {TimeTrackerModel.CalculateTotal(jobList):0.00}"))
+      decimal documentTotal = useBilledDuration
+        ? TimeTrackerModel.CalculateBilledTotal(jobList)
+        : TimeTrackerModel.CalculateTotal(jobList);
+      double documentHoursTotal = useBilledDuration
+        ? TimeTrackerModel.CalculateBilledHoursTotal(jobList)
+        : TimeTrackerModel.CalculateHoursTotal(jobList);
+
+      document.Blocks.Add(new Paragraph(new Run($"Total: {TimeTrackerModel.GetCurrencySummary(jobList)} {documentTotal:0.00}"))
       {
         FontSize = 16,
         FontWeight = FontWeights.SemiBold,
         TextAlignment = TextAlignment.Right
       });
-      document.Blocks.Add(new Paragraph(new Run($"Hours total: {TimeTrackerModel.CalculateHoursTotal(jobList):0.##}"))
+      document.Blocks.Add(new Paragraph(new Run($"Hours total: {documentHoursTotal:0.##}"))
       {
         FontSize = 14,
         FontWeight = FontWeights.SemiBold,
@@ -4383,19 +4457,19 @@ namespace TimeTracker
 
     private void NewClient()
     {
-      if (ShowClientDialog(null, out string name, out string address, out string companyName, out string email, out string phone, out string invoiceNumberPrefix, out int currentInvoiceNumber, out decimal defaultHourlyRate, out string defaultCurrency))
+      if (ShowClientDialog(null, out string name, out string address, out string companyName, out string email, out string phone, out string invoiceNumberPrefix, out int currentInvoiceNumber, out decimal defaultHourlyRate, out string defaultCurrency, out BillingRoundingMode? roundingMode, out int? roundingMinutes))
       {
         Client client = timeTracker.CreateClient(name);
-        timeTracker.UpdateClient(client, name, address, companyName, email, phone, invoiceNumberPrefix, currentInvoiceNumber, defaultHourlyRate, defaultCurrency);
+        timeTracker.UpdateClient(client, name, address, companyName, email, phone, invoiceNumberPrefix, currentInvoiceNumber, defaultHourlyRate, defaultCurrency, roundingMode, roundingMinutes);
         ShowClients();
       }
     }
 
     private void EditClient(Client client)
     {
-      if (ShowClientDialog(client, out string name, out string address, out string companyName, out string email, out string phone, out string invoiceNumberPrefix, out int currentInvoiceNumber, out decimal defaultHourlyRate, out string defaultCurrency))
+      if (ShowClientDialog(client, out string name, out string address, out string companyName, out string email, out string phone, out string invoiceNumberPrefix, out int currentInvoiceNumber, out decimal defaultHourlyRate, out string defaultCurrency, out BillingRoundingMode? roundingMode, out int? roundingMinutes))
       {
-        timeTracker.UpdateClient(client, name, address, companyName, email, phone, invoiceNumberPrefix, currentInvoiceNumber, defaultHourlyRate, defaultCurrency);
+        timeTracker.UpdateClient(client, name, address, companyName, email, phone, invoiceNumberPrefix, currentInvoiceNumber, defaultHourlyRate, defaultCurrency, roundingMode, roundingMinutes);
         ShowClients();
       }
     }
@@ -4516,6 +4590,48 @@ namespace TimeTracker
       ComboBox defaultCurrencyComboBox = CreateCurrencyComboBox(settings.DefaultCurrency);
       panel.Children.Add(CreateSettingsLabel("Default currency"));
       panel.Children.Add(defaultCurrencyComboBox);
+
+      panel.Children.Add(CreateSettingsHeading("Billing"));
+
+      // Rounding only ever applies to invoices; reports and the dashboard keep showing what was
+      // actually tracked.
+      ComboBox roundingModeComboBox = new()
+      {
+        ItemsSource = BillingRoundingModeOption.All,
+        SelectedItem = BillingRoundingModeOption.All.First(option => option.Value == settings.DefaultRoundingMode),
+        DisplayMemberPath = nameof(BillingRoundingModeOption.DisplayName),
+        Margin = new Thickness(0, 0, 0, 12),
+        Width = 260,
+        HorizontalAlignment = HorizontalAlignment.Left
+      };
+      panel.Children.Add(CreateSettingsLabel("Round invoiced time"));
+      panel.Children.Add(roundingModeComboBox);
+
+      TextBox roundingMinutesTextBox = CreateSettingsTextBox(settings.DefaultRoundingMinutes.ToString());
+      panel.Children.Add(CreateSettingsLabel("Round to minutes"));
+      panel.Children.Add(roundingMinutesTextBox);
+
+      roundingModeComboBox.SelectionChanged += (_, _) => SaveBillingSettingsIfValid(roundingModeComboBox, roundingMinutesTextBox, false);
+      roundingMinutesTextBox.LostFocus += (_, _) => SaveBillingSettingsIfValid(roundingModeComboBox, roundingMinutesTextBox, true);
+
+      panel.Children.Add(CreateSettingsHeading("Idle detection"));
+
+      CheckBox idleDetectionCheckBox = new()
+      {
+        Content = "Ask about idle time while a job is running",
+        IsChecked = settings.IdleDetectionEnabled,
+        Margin = new Thickness(0, 0, 0, 12),
+        HorizontalAlignment = HorizontalAlignment.Left
+      };
+      panel.Children.Add(idleDetectionCheckBox);
+
+      TextBox idleThresholdTextBox = CreateSettingsTextBox(settings.IdleThresholdMinutes.ToString());
+      panel.Children.Add(CreateSettingsLabel("Idle after minutes"));
+      panel.Children.Add(idleThresholdTextBox);
+
+      idleDetectionCheckBox.Checked += (_, _) => SaveIdleSettingsIfValid(idleDetectionCheckBox, idleThresholdTextBox, false);
+      idleDetectionCheckBox.Unchecked += (_, _) => SaveIdleSettingsIfValid(idleDetectionCheckBox, idleThresholdTextBox, false);
+      idleThresholdTextBox.LostFocus += (_, _) => SaveIdleSettingsIfValid(idleDetectionCheckBox, idleThresholdTextBox, true);
 
       panel.Children.Add(new TextBlock
       {
@@ -4649,6 +4765,9 @@ namespace TimeTracker
       };
       panel.Children.Add(CreateSettingsLabel("Time format"));
       panel.Children.Add(timeFormatComboBox);
+
+      panel.Children.Add(CreateSettingsHeading("Backups"));
+      panel.Children.Add(CreateBackupsList());
       timeFormatComboBox.SelectionChanged += (_, _) =>
       {
         settings.TimeDisplayFormat = ((TimeDisplayFormatOption)timeFormatComboBox.SelectedItem).Value;
@@ -4732,6 +4851,199 @@ namespace TimeTracker
       settings.LongRunningJobThresholdMinutes = thresholdMinutes;
       settings.LongRunningJobBehavior = ((LongRunningJobBehaviorOption)behaviorComboBox.SelectedItem).Value;
       settings.LongRunningJobReminderMinutes = reminderMinutes;
+      settings.Save();
+    }
+
+    /// <summary>
+    /// The backup folder as a list of restore points, newest first.
+    /// </summary>
+    private UIElement CreateBackupsList()
+    {
+      StackPanel backups = new()
+      {
+        Margin = new Thickness(0, 0, 0, 12)
+      };
+
+      IReadOnlyList<LiteDbTimeTrackerStore.BackupFile> backupFiles;
+
+      try
+      {
+        backupFiles = LiteDbTimeTrackerStore.GetBackups();
+      }
+      catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+      {
+        Logger.Instance.LogEvent($"Listing backups failed: {exception}");
+        backups.Children.Add(CreateEmptyText("The backup folder could not be read."));
+
+        return backups;
+      }
+
+      if (backupFiles.Count == 0)
+      {
+        backups.Children.Add(CreateEmptyText("No backups yet. One is taken each day the application runs."));
+
+        return backups;
+      }
+
+      foreach (LiteDbTimeTrackerStore.BackupFile backupFile in backupFiles)
+      {
+        backups.Children.Add(CreateBackupRow(backupFile));
+      }
+
+      return backups;
+    }
+
+    private UIElement CreateBackupRow(LiteDbTimeTrackerStore.BackupFile backupFile)
+    {
+      Grid row = new()
+      {
+        Margin = new Thickness(0, 0, 0, 8)
+      };
+      row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+      row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+      StackPanel details = new()
+      {
+        VerticalAlignment = VerticalAlignment.Center
+      };
+      details.Children.Add(new TextBlock
+      {
+        Text = FormatBackupTimestamp(backupFile.TakenAt),
+        FontWeight = FontWeights.SemiBold,
+        Foreground = PrimaryTextBrush
+      });
+      details.Children.Add(new TextBlock
+      {
+        Text = $"{backupFile.FileName} — {FormatFileSize(backupFile.SizeBytes)}",
+        FontSize = 12,
+        Foreground = SecondaryTextBrush
+      });
+      row.Children.Add(details);
+
+      Button restoreButton = CreatePanelActionButton("Restore", false, (_, _) => RestoreBackup(backupFile));
+      restoreButton.Margin = new Thickness(10, 0, 0, 0);
+      Grid.SetColumn(restoreButton, 1);
+      row.Children.Add(restoreButton);
+
+      return row;
+    }
+
+    /// <summary>
+    /// The daily backups are named by date alone, so showing them as taken at midnight would be
+    /// inventing a precision the name does not have.
+    /// </summary>
+    private static string FormatBackupTimestamp(DateTime takenAt)
+    {
+      return takenAt.TimeOfDay == TimeSpan.Zero
+        ? takenAt.ToString("d MMMM yyyy", CultureInfo.CurrentCulture)
+        : takenAt.ToString("d MMMM yyyy HH:mm", CultureInfo.CurrentCulture);
+    }
+
+    private static string FormatFileSize(long sizeBytes)
+    {
+      if (sizeBytes < 1024)
+      {
+        return $"{sizeBytes} bytes";
+      }
+
+      double kilobytes = sizeBytes / 1024d;
+
+      return kilobytes < 1024
+        ? $"{kilobytes:0.#} KB"
+        : $"{kilobytes / 1024:0.#} MB";
+    }
+
+    /// <summary>
+    /// Replaces the live database with a backup and closes the application, which is the only way
+    /// the restored data can be loaded: this instance holds the old data in memory and hot-swapping
+    /// it under a running singleton would be a fine way to lose both copies.
+    /// </summary>
+    private void RestoreBackup(LiteDbTimeTrackerStore.BackupFile backupFile)
+    {
+      MessageBoxResult confirmation = MessageBox.Show(
+        this,
+        $"Restore the backup taken on {FormatBackupTimestamp(backupFile.TakenAt)} ({backupFile.FileName})?{Environment.NewLine}{Environment.NewLine}" +
+        $"All clients, projects, jobs and invoices recorded since then will be replaced by what the backup holds. A copy of the current data is saved to the backup folder first, so this can be undone.{Environment.NewLine}{Environment.NewLine}" +
+        "Time Tracker will close once the backup is restored.",
+        "Restore backup",
+        MessageBoxButton.YesNo,
+        MessageBoxImage.Warning);
+
+      if (confirmation != MessageBoxResult.Yes)
+      {
+        return;
+      }
+
+      string? safetyCopyPath;
+
+      // Nothing this session holds may reach the database again: the timer saves a running job
+      // every minute, and the message boxes below pump messages while they wait for an answer.
+      timeTracker.SuspendPersistence();
+      isRestoringBackup = true;
+
+      try
+      {
+        safetyCopyPath = LiteDbTimeTrackerStore.RestoreFromBackup(backupFile.FilePath);
+      }
+      catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException)
+      {
+        // Whatever state the file is in, this session's data is now the only complete copy, so it
+        // gets to save again.
+        timeTracker.ResumePersistence();
+        isRestoringBackup = false;
+
+        Logger.Instance.LogEvent($"Restoring backup {backupFile.FilePath} failed: {exception}");
+        MessageBox.Show(
+          this,
+          $"Could not restore the backup.{Environment.NewLine}{Environment.NewLine}{exception.Message}",
+          "Restore backup",
+          MessageBoxButton.OK,
+          MessageBoxImage.Warning);
+        return;
+      }
+
+      MessageBox.Show(
+        this,
+        safetyCopyPath == null
+          ? $"The backup has been restored.{Environment.NewLine}{Environment.NewLine}Time Tracker will now close. Start it again to work with the restored data."
+          : $"The backup has been restored, and the data it replaced was saved as {Path.GetFileName(safetyCopyPath)}.{Environment.NewLine}{Environment.NewLine}Time Tracker will now close. Start it again to work with the restored data.",
+        "Restore backup",
+        MessageBoxButton.OK,
+        MessageBoxImage.Information);
+
+      Application.Current.Shutdown();
+    }
+
+    /// <summary>
+    /// Billing rounding saves on its own rather than through
+    /// <see cref="SaveSettingsIfValid" />, so a half-typed value in an unrelated field cannot
+    /// silently swallow the change.
+    /// </summary>
+    private void SaveBillingSettingsIfValid(ComboBox roundingModeComboBox, TextBox roundingMinutesTextBox, bool showWarnings)
+    {
+      if (!int.TryParse(roundingMinutesTextBox.Text, out int roundingMinutes) || roundingMinutes <= 0)
+      {
+        ShowSettingsWarning(showWarnings, "Enter a rounding granularity greater than zero.");
+        return;
+      }
+
+      TTAppSettings settings = TTAppSettings.Instance;
+      settings.DefaultRoundingMode = ((BillingRoundingModeOption)roundingModeComboBox.SelectedItem).Value ?? BillingRoundingMode.None;
+      settings.DefaultRoundingMinutes = roundingMinutes;
+      settings.Save();
+    }
+
+    private void SaveIdleSettingsIfValid(CheckBox idleDetectionCheckBox, TextBox idleThresholdTextBox, bool showWarnings)
+    {
+      if (!int.TryParse(idleThresholdTextBox.Text, out int idleThresholdMinutes) || idleThresholdMinutes <= 0)
+      {
+        ShowSettingsWarning(showWarnings, "Enter an idle threshold greater than zero.");
+        return;
+      }
+
+      TTAppSettings settings = TTAppSettings.Instance;
+      settings.IdleDetectionEnabled = idleDetectionCheckBox.IsChecked == true;
+      settings.IdleThresholdMinutes = idleThresholdMinutes;
       settings.Save();
     }
 
@@ -5041,7 +5353,11 @@ namespace TimeTracker
       };
     }
 
-    private bool ShowClientDialog(Client? client, out string name, out string address, out string companyName, out string email, out string phone, out string invoiceNumberPrefix, out int currentInvoiceNumber, out decimal defaultHourlyRate, out string defaultCurrency)
+    /// <summary>
+    /// A null <paramref name="roundingMode" /> or <paramref name="roundingMinutes" /> means the
+    /// client follows the application's billing default for that part.
+    /// </summary>
+    private bool ShowClientDialog(Client? client, out string name, out string address, out string companyName, out string email, out string phone, out string invoiceNumberPrefix, out int currentInvoiceNumber, out decimal defaultHourlyRate, out string defaultCurrency, out BillingRoundingMode? roundingMode, out int? roundingMinutes)
     {
       TextBox nameTextBox = CreateDialogTextBox(client?.Name ?? string.Empty);
       TextBox companyNameTextBox = CreateDialogTextBox(client?.CompanyName ?? string.Empty);
@@ -5054,6 +5370,14 @@ namespace TimeTracker
       defaultCurrencyComboBox.HorizontalAlignment = HorizontalAlignment.Center;
       TextBox invoiceNumberPrefixTextBox = CreateDialogTextBox(client?.InvoiceNumberPrefix ?? string.Empty);
       TextBox currentInvoiceNumberTextBox = CreateDialogTextBox((client?.CurrentInvoiceNumber > 0 ? client.CurrentInvoiceNumber : 1).ToString());
+      ComboBox roundingModeComboBox = new()
+      {
+        ItemsSource = BillingRoundingModeOption.AllWithDefault,
+        SelectedItem = BillingRoundingModeOption.AllWithDefault.First(option => option.Value == client?.RoundingMode),
+        DisplayMemberPath = nameof(BillingRoundingModeOption.DisplayName),
+        Width = 220
+      };
+      TextBox roundingMinutesTextBox = CreateDialogTextBox(client?.RoundingMinutes?.ToString() ?? string.Empty);
 
       bool accepted = ShowSimpleForm(
         client == null ? "New client" : "Edit client",
@@ -5067,7 +5391,9 @@ namespace TimeTracker
           ("Default hourly rate", (Control)defaultHourlyRateTextBox),
           ("Default currency", (Control)defaultCurrencyComboBox),
           ("Invoice number prefix", (Control)invoiceNumberPrefixTextBox),
-          ("Current invoice number", (Control)currentInvoiceNumberTextBox)
+          ("Current invoice number", (Control)currentInvoiceNumberTextBox),
+          ("Billing rounding", (Control)roundingModeComboBox),
+          ("Rounding minutes (blank for the default)", (Control)roundingMinutesTextBox)
         });
 
       name = nameTextBox.Text.Trim();
@@ -5079,6 +5405,19 @@ namespace TimeTracker
       invoiceNumberPrefix = invoiceNumberPrefixTextBox.Text.Trim();
       currentInvoiceNumber = 1;
       defaultHourlyRate = 0;
+      roundingMode = ((BillingRoundingModeOption)roundingModeComboBox.SelectedItem).Value;
+      roundingMinutes = null;
+
+      if (accepted && !string.IsNullOrWhiteSpace(roundingMinutesTextBox.Text))
+      {
+        if (!int.TryParse(roundingMinutesTextBox.Text, out int parsedRoundingMinutes) || parsedRoundingMinutes <= 0)
+        {
+          MessageBox.Show(this, "Enter rounding minutes greater than zero, or leave it blank to use the default.", "Client", MessageBoxButton.OK, MessageBoxImage.Warning);
+          return false;
+        }
+
+        roundingMinutes = parsedRoundingMinutes;
+      }
 
       if (accepted && string.IsNullOrWhiteSpace(name))
       {
@@ -5301,6 +5640,17 @@ namespace TimeTracker
       };
     }
 
+    private static TextBlock CreateSettingsHeading(string text)
+    {
+      return new TextBlock
+      {
+        Text = text,
+        FontSize = 22,
+        FontWeight = FontWeights.SemiBold,
+        Margin = new Thickness(0, 10, 0, 15)
+      };
+    }
+
     private static TextBlock CreateSettingsLabel(string text)
     {
       return new TextBlock
@@ -5378,7 +5728,7 @@ namespace TimeTracker
       Client? client = timeTracker.FindClient(invoice.ClientID);
       double hoursTotal = invoice.HoursTotal > 0
         ? invoice.HoursTotal
-        : TimeTrackerModel.CalculateHoursTotal(timeTracker.GetInvoiceJobs(invoice));
+        : TimeTrackerModel.CalculateBilledHoursTotal(timeTracker.GetInvoiceJobs(invoice));
       return new InvoiceRow(invoice, client?.Name ?? string.Empty, hoursTotal);
     }
 
@@ -5521,15 +5871,23 @@ namespace TimeTracker
 
     private class JobRow
     {
-      public JobRow(WorkEntry workEntry)
+      public JobRow(WorkEntry workEntry) : this(workEntry, workEntry.Duration)
+      {
+      }
+
+      /// <summary>
+      /// <paramref name="duration" /> lets a billing view show rounded time where the plain record
+      /// of the job shows what was tracked.
+      /// </summary>
+      protected JobRow(WorkEntry workEntry, TimeSpan duration)
       {
         StartTime = workEntry.StartTime;
         ClientName = workEntry.ClientName;
         ProjectName = workEntry.ProjectName;
         Description = workEntry.Description ?? string.Empty;
-        Hours = workEntry.Duration.TotalHours;
+        Hours = duration.TotalHours;
         HourlyRate = workEntry.HourlyRate;
-        Total = Convert.ToDecimal(workEntry.Duration.TotalHours) * workEntry.HourlyRate;
+        Total = Convert.ToDecimal(duration.TotalHours) * workEntry.HourlyRate;
         Currency = workEntry.Currency;
       }
 
@@ -5545,7 +5903,9 @@ namespace TimeTracker
 
     private sealed class InvoiceJobSelection : JobRow
     {
-      public InvoiceJobSelection(WorkEntry workEntry) : base(workEntry)
+      // The rows quote what the client will be charged, so they show the rounded time rather than
+      // the tracked time.
+      public InvoiceJobSelection(WorkEntry workEntry) : base(workEntry, TimeTrackerModel.GetBilledDuration(workEntry))
       {
         WorkEntry = workEntry;
       }
@@ -5571,6 +5931,35 @@ namespace TimeTracker
         new LongRunningJobBehaviorOption(LongRunningJobBehavior.PromptAndStop, "Prompt and stop"),
         new LongRunningJobBehaviorOption(LongRunningJobBehavior.RepeatReminder, "Repeat reminder")
       };
+    }
+
+    private sealed class BillingRoundingModeOption
+    {
+      public BillingRoundingModeOption(BillingRoundingMode? value, string displayName)
+      {
+        Value = value;
+        DisplayName = displayName;
+      }
+
+      /// <summary>
+      /// Null is the "use the application default" choice a client can make; the application's own
+      /// setting always names a mode.
+      /// </summary>
+      public BillingRoundingMode? Value { get; }
+
+      public string DisplayName { get; }
+
+      public static IReadOnlyList<BillingRoundingModeOption> All { get; } = new[]
+      {
+        new BillingRoundingModeOption(BillingRoundingMode.None, "No rounding"),
+        new BillingRoundingModeOption(BillingRoundingMode.Nearest, "Nearest"),
+        new BillingRoundingModeOption(BillingRoundingMode.Up, "Always up")
+      };
+
+      public static IReadOnlyList<BillingRoundingModeOption> AllWithDefault { get; } = new[]
+      {
+        new BillingRoundingModeOption(null, "Use the default")
+      }.Concat(All).ToList();
     }
 
     private sealed class TimeDisplayFormatOption
@@ -5646,6 +6035,14 @@ namespace TimeTracker
 
     private void Window_Closing(object sender, CancelEventArgs e)
     {
+      // A restore has just written a backup over the database. Saving now, or stopping to ask about
+      // a running job, would put this session's data back on top of it.
+      if (isRestoringBackup)
+      {
+        SaveWindowState();
+        return;
+      }
+
       if (!timeTracker.HasRunningWork)
       {
         SaveWindowState();

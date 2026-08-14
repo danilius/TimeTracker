@@ -616,6 +616,20 @@ namespace TimeTracker.Models
       return workEntries.Sum(workEntry => Convert.ToDecimal(workEntry.Duration.TotalHours) * workEntry.HourlyRate);
     }
 
+    /// <summary>
+    /// Money split by the currency it was earned in, largest first. Currencies are not
+    /// interchangeable, so a mixed period has to report one figure each rather than a single sum
+    /// that quietly adds pounds to euros. Entries with no currency form their own unnamed group.
+    /// </summary>
+    public static IReadOnlyList<(string Currency, decimal Total)> CalculateTotalsByCurrency(IEnumerable<WorkEntry> workEntries)
+    {
+      return workEntries
+        .GroupBy(workEntry => string.IsNullOrWhiteSpace(workEntry.Currency) ? string.Empty : workEntry.Currency.Trim())
+        .Select(group => (Currency: group.Key, Total: CalculateTotal(group)))
+        .OrderByDescending(currencyTotal => currencyTotal.Total)
+        .ToList();
+    }
+
     public static double CalculateHoursTotal(IEnumerable<WorkEntry> workEntries)
     {
       return workEntries.Sum(workEntry => workEntry.Duration.TotalHours);

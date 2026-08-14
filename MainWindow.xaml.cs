@@ -19,6 +19,7 @@ using System.Windows.Threading;
 using System.Windows.Automation;
 using TimeTracker.Dialogs;
 using TimeTracker.Models;
+using TimeTracker.Services;
 using TimeTracker.Utils;
 
 namespace TimeTracker
@@ -60,7 +61,11 @@ namespace TimeTracker
     private readonly HashSet<Guid> selectedWorkEntryIDs = new();
     private TimesheetSortColumn timesheetSortColumn = TimesheetSortColumn.Start;
     private ListSortDirection timesheetSortDirection = ListSortDirection.Descending;
+    private string jobsSearchTerm = string.Empty;
+    private JobsFilterMode jobsFilterMode = JobsFilterMode.All;
     private TextBlock? jobsActiveTimerTextBlock;
+    private TextBlock? jobsRecentSubtitleTextBlock;
+    private ScrollViewer? jobsRecentTableScroll;
     private static readonly Brush AccentBrush = Palette.Accent;
     private static readonly Brush PrimaryTextBrush = Palette.PrimaryText;
     private static readonly Brush SecondaryTextBrush = Palette.SecondaryText;
@@ -436,8 +441,7 @@ namespace TimeTracker
         .ToList();
 
       double totalHours = TimeTrackerModel.CalculateHoursTotal(periodEntries);
-      decimal totalEarned = TimeTrackerModel.CalculateTotal(periodEntries);
-      string currency = TimeTrackerModel.GetCurrencySummary(periodEntries);
+      string totalEarned = FormatTotalsByCurrency(periodEntries);
       double averagePerWorkedDay = periodEntries
         .GroupBy(workEntry => workEntry.StartTime.Date)
         .Where(group => group.Sum(workEntry => workEntry.Duration.TotalHours) > 0)
@@ -461,7 +465,7 @@ namespace TimeTracker
         Margin = new Thickness(0)
       };
       leftMetrics.Children.Add(CreateMetricTile("Hours", $"{totalHours:0.#}h", "Logged this week", DashboardMetricIcon.Hours, AccentBrush, new Thickness(0, 0, 8, 0)));
-      leftMetrics.Children.Add(CreateMetricTile("Earnings", $"{currency} {totalEarned:0.00}".Trim(), "Estimated from rates", DashboardMetricIcon.Earnings, SuccessBrush, new Thickness(8, 0, 0, 0)));
+      leftMetrics.Children.Add(CreateMetricTile("Earnings", totalEarned, "Estimated from rates", DashboardMetricIcon.Earnings, SuccessBrush, new Thickness(8, 0, 0, 0)));
       metricsRow.Children.Add(leftMetrics);
 
       UniformGrid rightMetrics = new()
@@ -692,7 +696,10 @@ namespace TimeTracker
         Foreground = PrimaryTextBrush,
         FontSize = 26,
         FontWeight = FontWeights.SemiBold,
-        Margin = new Thickness(0, 6, 0, 2)
+        Margin = new Thickness(0, 6, 0, 2),
+        // A mixed-currency earnings figure can outgrow the tile; trim rather than spill over it.
+        TextTrimming = TextTrimming.CharacterEllipsis,
+        ToolTip = value
       });
       textContent.Children.Add(new TextBlock
       {
@@ -898,9 +905,7 @@ namespace TimeTracker
         foreach (IGrouping<string, WorkEntry> group in groups)
         {
           double hours = group.Sum(entry => entry.Duration.TotalHours);
-          decimal total = TimeTrackerModel.CalculateTotal(group);
-          string currency = TimeTrackerModel.GetCurrencySummary(group);
-          content.Children.Add(CreateBreakdownRow(group.Key, $"{hours:0.#}h", $"{currency} {total:0.00}".Trim(), hours / maxHours, GetClientBrush(group.Key)));
+          content.Children.Add(CreateBreakdownRow(group.Key, $"{hours:0.#}h", FormatTotalsByCurrency(group), hours / maxHours, GetClientBrush(group.Key)));
         }
       }
 
@@ -960,7 +965,7 @@ namespace TimeTracker
             clientName,
             projectName,
             $"{group.Sum(entry => entry.Duration.TotalHours):0.#}h",
-            $"{TimeTrackerModel.GetCurrencySummary(group)} {TimeTrackerModel.CalculateTotal(group):0.00}".Trim(),
+            FormatTotalsByCurrency(group),
             GetClientBrush(clientName)));
         }
       }
@@ -1212,6 +1217,9 @@ namespace TimeTracker
       HeaderSubLabel.Visibility = Visibility.Visible;
       HeaderSubLabel.Text = string.Empty;
       HeaderSubLabel.Visibility = Visibility.Collapsed;
+      // The old table is about to be discarded; drop it so a refresh cannot touch a dead visual.
+      jobsRecentTableScroll = null;
+      jobsRecentSubtitleTextBlock = null;
       HeaderCenterContent.Content = CreateJobsHeaderToolbar();
       SaveCurrentPage(JobsPage);
       if (timeTracker.HasRunningWork)
@@ -1257,19 +1265,8 @@ namespace TimeTracker
         VerticalAlignment = VerticalAlignment.Center
       };
 
-      TextBox searchBox = new()
-      {
-        Text = "Search jobs",
-        Width = 260,
-        Height = 38,
-        Padding = new Thickness(12, 8, 12, 0),
-        Foreground = SecondaryTextBrush,
-        BorderBrush = PanelBorderBrush,
-        BorderThickness = new Thickness(1),
-        Margin = new Thickness(0, 0, 12, 0)
-      };
-      toolbar.Children.Add(searchBox);
-      toolbar.Children.Add(CreateJobsIconButton("\uE71C", (_, _) => { }));
+      toolbar.Children.Add(CreateJobsSearchBox());
+      toolbar.Children.Add(CreateJobsFilterButton());
       Button compactButton = CreateJobsIconButton("\uE8A7", (_, _) => EnterCompactJobsMode());
       compactButton.ToolTip = "Compact Jobs Monitor";
       toolbar.Children.Add(compactButton);
@@ -1286,6 +1283,179 @@ namespace TimeTracker
       toolbar.Children.Add(newJobButton);
 
       return toolbar;
+    }
+
+    /// <summary>
+    /// Which jobs the Recent jobs table shows, on top of the text search.
+    /// </summary>
+    private enum JobsFilterMode
+    {
+      All,
+      Running,
+      HasDescription
+    }
+
+    /// <summary>
+    /// The search box, with the placeholder drawn behind the text rather than held in Text: a
+    /// placeholder that lives in Text is editable, and reads back as a search term nobody typed.
+    /// </summary>
+    private UIElement CreateJobsSearchBox()
+    {
+      TextBox searchBox = new()
+      {
+        Text = jobsSearchTerm,
+        Height = 38,
+        Padding = new Thickness(12, 8, 12, 0),
+        Foreground = PrimaryTextBrush,
+        BorderBrush = PanelBorderBrush,
+        BorderThickness = new Thickness(1)
+      };
+      AutomationProperties.SetName(searchBox, "Search jobs");
+
+      TextBlock placeholder = new()
+      {
+        Text = "Search jobs",
+        Foreground = SecondaryTextBrush,
+        // Matches the box's border plus padding so the placeholder sits exactly where the text will.
+        Margin = new Thickness(13, 9, 13, 0),
+        VerticalAlignment = VerticalAlignment.Top,
+        IsHitTestVisible = false
+      };
+
+      void UpdatePlaceholder()
+      {
+        placeholder.Visibility = searchBox.Text.Length == 0 && !searchBox.IsKeyboardFocusWithin
+          ? Visibility.Visible
+          : Visibility.Collapsed;
+      }
+
+      searchBox.TextChanged += (_, _) =>
+      {
+        jobsSearchTerm = searchBox.Text;
+        UpdatePlaceholder();
+        // Only the table is rebuilt, so the box keeps focus and the caret while the user types.
+        RefreshRecentJobs();
+      };
+      searchBox.GotKeyboardFocus += (_, _) => UpdatePlaceholder();
+      searchBox.LostKeyboardFocus += (_, _) => UpdatePlaceholder();
+      UpdatePlaceholder();
+
+      Grid host = new()
+      {
+        Width = 260,
+        Margin = new Thickness(0, 0, 12, 0)
+      };
+      host.Children.Add(searchBox);
+      host.Children.Add(placeholder);
+      return host;
+    }
+
+    private Button CreateJobsFilterButton()
+    {
+      ContextMenu menu = new();
+      Button button = CreateJobsIconButton("\uE71C", (sender, _) =>
+      {
+        menu.PlacementTarget = sender as UIElement;
+        menu.Placement = PlacementMode.Bottom;
+        menu.IsOpen = true;
+      });
+      button.ContextMenu = menu;
+
+      List<MenuItem> items = new();
+      foreach ((JobsFilterMode Mode, string Label) option in JobsFilterOptions)
+      {
+        MenuItem item = new()
+        {
+          Header = option.Label,
+          IsCheckable = true,
+          IsChecked = jobsFilterMode == option.Mode
+        };
+        item.Click += (_, _) =>
+        {
+          jobsFilterMode = option.Mode;
+          // The menu items are a single choice, so checking one has to clear the rest. Re-checking
+          // the active item would otherwise leave no filter marked at all.
+          foreach (MenuItem menuItem in items)
+          {
+            menuItem.IsChecked = ReferenceEquals(menuItem, item);
+          }
+
+          ApplyJobsFilterButtonState(button);
+          RefreshRecentJobs();
+        };
+        items.Add(item);
+        menu.Items.Add(item);
+      }
+
+      ApplyJobsFilterButtonState(button);
+      return button;
+    }
+
+    private static readonly (JobsFilterMode Mode, string Label)[] JobsFilterOptions =
+    {
+      (JobsFilterMode.All, "All jobs"),
+      (JobsFilterMode.Running, "Running only"),
+      (JobsFilterMode.HasDescription, "Has description")
+    };
+
+    private void ApplyJobsFilterButtonState(Button button)
+    {
+      string label = JobsFilterOptions.First(option => option.Mode == jobsFilterMode).Label;
+      button.ToolTip = $"Filter: {label}";
+      AutomationProperties.SetName(button, $"Filter: {label}");
+
+      bool isFiltering = jobsFilterMode != JobsFilterMode.All;
+      button.Background = isFiltering ? Palette.Highlight : Brushes.White;
+      button.BorderBrush = isFiltering ? Palette.HighlightBorder : PanelBorderBrush;
+      button.Foreground = isFiltering ? AccentBrush : SecondaryTextBrush;
+    }
+
+    /// <summary>
+    /// The jobs left after the filter mode and the search term, newest first with running jobs on
+    /// top - the order the Recent jobs table has always used.
+    /// </summary>
+    private List<WorkEntry> GetFilteredJobs()
+    {
+      string searchTerm = jobsSearchTerm.Trim();
+
+      return timeTracker.WorkEntries
+        .Where(MatchesJobsFilterMode)
+        .Where(workEntry => MatchesJobsSearch(workEntry, searchTerm))
+        .OrderByDescending(workEntry => workEntry.IsRunning)
+        .ThenByDescending(workEntry => workEntry.StartTime)
+        .ToList();
+    }
+
+    private bool MatchesJobsFilterMode(WorkEntry workEntry)
+    {
+      return jobsFilterMode switch
+      {
+        JobsFilterMode.Running => workEntry.IsRunning,
+        JobsFilterMode.HasDescription => !string.IsNullOrWhiteSpace(workEntry.Description),
+        _ => true
+      };
+    }
+
+    private static bool MatchesJobsSearch(WorkEntry workEntry, string searchTerm)
+    {
+      if (searchTerm.Length == 0)
+      {
+        return true;
+      }
+
+      return ContainsIgnoringCase(workEntry.ClientName, searchTerm)
+        || ContainsIgnoringCase(workEntry.ProjectName, searchTerm)
+        || ContainsIgnoringCase(workEntry.Description, searchTerm);
+    }
+
+    private static bool ContainsIgnoringCase(string? text, string searchTerm)
+    {
+      return text != null && text.Contains(searchTerm, StringComparison.CurrentCultureIgnoreCase);
+    }
+
+    private bool IsJobsFilterActive()
+    {
+      return jobsFilterMode != JobsFilterMode.All || jobsSearchTerm.Trim().Length > 0;
     }
 
     private void EnterCompactJobsMode()
@@ -1630,11 +1800,10 @@ namespace TimeTracker
       return panel;
     }
 
+    private const int RecentJobsShown = 8;
+
     private Border CreateRecentJobsPanel()
     {
-      const int recentJobsShown = 8;
-      int totalJobs = timeTracker.WorkEntries.Count;
-
       Border panel = CreatePanelBorder();
       panel.Padding = new Thickness(0);
       DockPanel content = new();
@@ -1646,16 +1815,16 @@ namespace TimeTracker
         FontWeight = FontWeights.SemiBold,
         Foreground = PrimaryTextBrush
       });
-      if (totalJobs > recentJobsShown)
+
+      // The list is capped and may be filtered, so say what is on screen rather than letting it
+      // look like the whole history.
+      jobsRecentSubtitleTextBlock = new TextBlock
       {
-        // The list is capped, so say so rather than letting it look like the whole history.
-        titleText.Children.Add(new TextBlock
-        {
-          Text = $"Latest {recentJobsShown} of {totalJobs} — see Time sheets for all",
-          Margin = new Thickness(0, 3, 0, 0),
-          Foreground = SecondaryTextBrush
-        });
-      }
+        Margin = new Thickness(0, 3, 0, 0),
+        Foreground = SecondaryTextBrush
+      };
+      titleText.Children.Add(jobsRecentSubtitleTextBlock);
+
       Border titleArea = new()
       {
         Padding = new Thickness(16, 14, 16, 10),
@@ -1666,25 +1835,58 @@ namespace TimeTracker
       DockPanel.SetDock(titleArea, Dock.Top);
       content.Children.Add(titleArea);
 
-      List<WorkEntry> jobs = timeTracker.WorkEntries
-        .OrderByDescending(workEntry => workEntry.IsRunning)
-        .ThenByDescending(workEntry => workEntry.StartTime)
-        .Take(recentJobsShown)
-        .ToList();
-
-      StackPanel table = BuildTable(
-        jobs,
-        JobColumns(),
-        "No jobs yet. Create a new job to start tracking.");
-
-      ScrollViewer scrollViewer = new()
+      jobsRecentTableScroll = new ScrollViewer
       {
-        Content = table,
         VerticalScrollBarVisibility = ScrollBarVisibility.Auto
       };
-      content.Children.Add(scrollViewer);
+      content.Children.Add(jobsRecentTableScroll);
+      RefreshRecentJobs();
       panel.Child = content;
       return panel;
+    }
+
+    /// <summary>
+    /// Rebuilds only the Recent jobs table and its subtitle. Searching this way leaves the rest of
+    /// the page - and the caret in the search box - untouched.
+    /// </summary>
+    private void RefreshRecentJobs()
+    {
+      if (jobsRecentTableScroll == null)
+      {
+        return;
+      }
+
+      int totalJobs = timeTracker.WorkEntries.Count;
+      List<WorkEntry> matches = GetFilteredJobs();
+      List<WorkEntry> jobs = matches.Take(RecentJobsShown).ToList();
+
+      jobsRecentTableScroll.Content = BuildTable(
+        jobs,
+        JobColumns(),
+        totalJobs == 0
+          ? "No jobs yet. Create a new job to start tracking."
+          : "No jobs match the current search or filter.");
+
+      if (jobsRecentSubtitleTextBlock == null)
+      {
+        return;
+      }
+
+      string subtitle = DescribeRecentJobs(jobs.Count, matches.Count, totalJobs);
+      jobsRecentSubtitleTextBlock.Text = subtitle;
+      jobsRecentSubtitleTextBlock.Visibility = subtitle.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private string DescribeRecentJobs(int shown, int matched, int total)
+    {
+      if (!IsJobsFilterActive())
+      {
+        return shown < total ? $"Latest {shown} of {total} — see Time sheets for all" : string.Empty;
+      }
+
+      return shown < matched
+        ? $"Latest {shown} of {matched} matching jobs — see Time sheets for all"
+        : $"{matched} of {total} jobs match";
     }
 
     private UIElement CreateQuickStartRow(Project project)
@@ -2389,6 +2591,20 @@ namespace TimeTracker
         : $"{currency}{total:0.00}";
     }
 
+    /// <summary>
+    /// A set of entries as money: one figure per currency, joined. Pounds cannot be added to euros,
+    /// so a mixed period reads as "£ 900.00 + € 130.01" rather than a single misleading number.
+    /// A single currency renders exactly as it always has.
+    /// </summary>
+    private static string FormatTotalsByCurrency(IEnumerable<WorkEntry> workEntries)
+    {
+      IReadOnlyList<(string Currency, decimal Total)> totals = TimeTrackerModel.CalculateTotalsByCurrency(workEntries);
+
+      return totals.Count == 0
+        ? "0.00"
+        : string.Join(" + ", totals.Select(currencyTotal => $"{currencyTotal.Currency} {currencyTotal.Total:0.00}".Trim()));
+    }
+
     private static StackPanel CreateIconTextContent(string icon, string text)
     {
       StackPanel content = new()
@@ -2665,6 +2881,10 @@ namespace TimeTracker
             ShowTimesheets();
           }
         }),
+        CreateToolbarButton("Export CSV", (_, _) => SaveWorkEntryCsv(
+          "Export Time Sheet",
+          $"timesheet-{DateTime.Today:yyyyMMdd}",
+          entries)),
         new ScrollViewer
         {
           Content = table,
@@ -3110,6 +3330,18 @@ namespace TimeTracker
           {
             SaveReportFile(selectedRows.First().Report);
           }
+        }),
+        CreateToolbarButton("Export CSV", (_, _) =>
+        {
+          if (selectedRows.Count == 1)
+          {
+            Report report = selectedRows.First().Report;
+            SaveWorkEntryCsv("Export Report", report.Name, timeTracker.GetReportJobs(report));
+          }
+          else
+          {
+            MessageBox.Show(this, "Select one report to export.", "Reports", MessageBoxButton.OK, MessageBoxImage.Information);
+          }
         })
       },
         CreateModernTableScroll(table)));
@@ -3171,6 +3403,18 @@ namespace TimeTracker
           if (selectedRows.Count == 1)
           {
             ShowInvoiceJobs(selectedRows.First().Invoice);
+          }
+        }),
+        CreateToolbarButton("Export CSV", (_, _) =>
+        {
+          if (selectedRows.Count == 1)
+          {
+            Invoice invoice = selectedRows.First().Invoice;
+            SaveWorkEntryCsv("Export Invoice", invoice.InvoiceNumber, timeTracker.GetInvoiceJobs(invoice));
+          }
+          else
+          {
+            MessageBox.Show(this, "Select one invoice to export.", "Invoices", MessageBoxButton.OK, MessageBoxImage.Information);
           }
         })
       },
@@ -3309,12 +3553,17 @@ namespace TimeTracker
 
     private bool TryGetSavePath(string title, string fileName, string initialFolder, out string filePath)
     {
+      return TryGetSavePath(title, fileName, initialFolder, ".docx", "Word documents (*.docx)|*.docx|All files (*.*)|*.*", out filePath);
+    }
+
+    private bool TryGetSavePath(string title, string fileName, string initialFolder, string defaultExtension, string filter, out string filePath)
+    {
       Microsoft.Win32.SaveFileDialog dialog = new()
       {
         Title = title,
         FileName = fileName,
-        DefaultExt = ".docx",
-        Filter = "Word documents (*.docx)|*.docx|All files (*.*)|*.*",
+        DefaultExt = defaultExtension,
+        Filter = filter,
         InitialDirectory = Directory.Exists(initialFolder)
           ? initialFolder
           : Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)
@@ -3323,6 +3572,40 @@ namespace TimeTracker
       bool accepted = dialog.ShowDialog(this) == true;
       filePath = accepted ? dialog.FileName : string.Empty;
       return accepted;
+    }
+
+    /// <summary>
+    /// Exports work entries as CSV. The Word exports let a write failure reach the crash handler,
+    /// which kills the app; an export the user can simply retry does not deserve that, so a locked
+    /// or unwritable file is reported and the session carries on.
+    /// </summary>
+    private void SaveWorkEntryCsv(string title, string suggestedName, IEnumerable<WorkEntry> workEntries)
+    {
+      string suggestedFileName = $"{SanitizeFileName(suggestedName)}.csv";
+
+      if (!TryGetSavePath(title, suggestedFileName, TTAppSettings.Instance.LastCsvFolder, ".csv", "CSV files (*.csv)|*.csv|All files (*.*)|*.*", out string filePath))
+      {
+        return;
+      }
+
+      try
+      {
+        CsvExport.WriteWorkEntryCsv(filePath, workEntries);
+      }
+      catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException)
+      {
+        Logger.Instance.LogEvent($"CSV export to {filePath} failed: {exception}");
+        MessageBox.Show(
+          this,
+          $"Could not save the CSV file.{Environment.NewLine}{Environment.NewLine}{exception.Message}",
+          title,
+          MessageBoxButton.OK,
+          MessageBoxImage.Warning);
+        return;
+      }
+
+      TTAppSettings.Instance.LastCsvFolder = Path.GetDirectoryName(filePath) ?? string.Empty;
+      TTAppSettings.Instance.Save();
     }
 
     private static void SaveJobsWordDocument(string filePath, string title, IEnumerable<WorkEntry> jobs, DateTime startDate, DateTime endDate, string clientName, string clientCompany, string clientAddress, DateTime? issueDate, string configuredTemplatePath, string fallbackTemplateName = "InvoiceTemplateExample.docx")
@@ -3916,7 +4199,7 @@ namespace TimeTracker
     private static void UpdateInvoiceSelectionTotal(List<InvoiceJobSelection> jobs, TextBlock totalTextBlock)
     {
       List<WorkEntry> selectedJobs = jobs.Where(job => job.IsIncluded).Select(job => job.WorkEntry).ToList();
-      totalTextBlock.Text = $"Total: {TimeTrackerModel.GetCurrencySummary(selectedJobs)} {TimeTrackerModel.CalculateTotal(selectedJobs):0.00}";
+      totalTextBlock.Text = $"Total: {FormatTotalsByCurrency(selectedJobs)}";
     }
 
     private void PrintReport(Report report)

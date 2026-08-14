@@ -286,6 +286,13 @@ namespace TimeTracker.Utils
       set { _lastReportFolder = value; }
     }
 
+    private string _lastCsvFolder = "";
+    public string LastCsvFolder
+    {
+      get { return _lastCsvFolder; }
+      set { _lastCsvFolder = value; }
+    }
+
     private string _wordTemplatePath = "";
     public string WordTemplatePath
     {

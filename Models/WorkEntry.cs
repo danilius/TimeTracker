@@ -132,21 +132,80 @@ namespace TimeTracker.Models
       }
     }
 
+    /// <summary>
+    /// Time this job spent paused. Kept separate from the start and end times so those stay a
+    /// plain record of when the work began and finished, which is what invoices and sorting use.
+    /// </summary>
+    private TimeSpan _pausedDuration;
+    public TimeSpan PausedDuration
+    {
+      get { return _pausedDuration; }
+      set
+      {
+        if (_pausedDuration != value)
+        {
+          _pausedDuration = value;
+          OnPropertyChanged();
+          OnPropertyChanged(nameof(Duration));
+        }
+      }
+    }
+
+    /// <summary>
+    /// When the current pause began, or null when the job is not paused. Persisted so a pause
+    /// survives closing the application.
+    /// </summary>
+    private DateTime? _pausedAt;
+    public DateTime? PausedAt
+    {
+      get { return _pausedAt; }
+      set
+      {
+        if (_pausedAt != value)
+        {
+          _pausedAt = value;
+          OnPropertyChanged();
+          OnPropertyChanged(nameof(IsPaused));
+          OnPropertyChanged(nameof(Duration));
+        }
+      }
+    }
+
+    [JsonIgnore]
+    public bool IsPaused => _pausedAt.HasValue;
+
+    /// <summary>
+    /// Billable time: the elapsed span less anything spent paused, including a pause still open.
+    /// </summary>
     public TimeSpan Duration
     {
       get
       {
+        TimeSpan elapsed;
+
         if (IsRunning)
         {
-          return DateTime.Now - StartTime;
+          elapsed = DateTime.Now - StartTime;
         }
-
-        if (EndTime == default)
+        else if (EndTime == default)
         {
           return TimeSpan.Zero;
         }
+        else
+        {
+          elapsed = EndTime - StartTime;
+        }
 
-        return EndTime - StartTime;
+        TimeSpan paused = _pausedDuration;
+
+        if (_pausedAt.HasValue)
+        {
+          paused += DateTime.Now - _pausedAt.Value;
+        }
+
+        TimeSpan worked = elapsed - paused;
+
+        return worked < TimeSpan.Zero ? TimeSpan.Zero : worked;
       }
     }
 

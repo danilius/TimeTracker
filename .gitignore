@@ -372,3 +372,7 @@ mockups/
 
 # Local Affinity document lock files
 *.af~lock~
+
+# Claude Code session data, including agent worktrees
+.claude/
+

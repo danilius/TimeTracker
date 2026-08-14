@@ -372,6 +372,59 @@ namespace TimeTracker.Models
       RunningWorkChanged?.Invoke(this, EventArgs.Empty);
     }
 
+    public bool HasPausedWork => _currentWorkEntry?.IsPaused == true;
+
+    /// <summary>
+    /// Suspends the running job. The clock keeps moving, but the paused span is subtracted from
+    /// the entry's billable duration.
+    /// </summary>
+    public void PauseWork()
+    {
+      if (_currentWorkEntry == null || _currentWorkEntry.IsPaused)
+      {
+        return;
+      }
+
+      _currentWorkEntry.PausedAt = DateTime.Now;
+
+      SaveData();
+      RunningWorkChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    public void ResumeWork()
+    {
+      if (_currentWorkEntry == null || !_currentWorkEntry.IsPaused)
+      {
+        return;
+      }
+
+      ClosePause(_currentWorkEntry, DateTime.Now);
+
+      SaveData();
+      RunningWorkChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Folds an open pause into the total. Used when resuming and when stopping a paused job, so
+    /// a job can never be stopped with a pause left hanging.
+    /// </summary>
+    private static void ClosePause(WorkEntry workEntry, DateTime until)
+    {
+      if (!workEntry.PausedAt.HasValue)
+      {
+        return;
+      }
+
+      TimeSpan pause = until - workEntry.PausedAt.Value;
+
+      if (pause > TimeSpan.Zero)
+      {
+        workEntry.PausedDuration += pause;
+      }
+
+      workEntry.PausedAt = null;
+    }
+
     public void StopWork()
     {
       StopWork(DateTime.Now);
@@ -385,9 +438,12 @@ namespace TimeTracker.Models
     {
       if (_currentWorkEntry != null)
       {
-        _currentWorkEntry.EndTime = endTime < _currentWorkEntry.StartTime
+        DateTime end = endTime < _currentWorkEntry.StartTime
           ? _currentWorkEntry.StartTime
           : endTime;
+
+        ClosePause(_currentWorkEntry, end);
+        _currentWorkEntry.EndTime = end;
         _currentWorkEntry.IsRunning = false;
       }
 
@@ -925,7 +981,8 @@ namespace TimeTracker.Models
 
     private void CheckLongRunningJobPolicy()
     {
-      if (_currentWorkEntry == null || _isShowingLongRunningPrompt)
+      // A paused job is not running away with the clock, so it is not worth warning about.
+      if (_currentWorkEntry == null || _isShowingLongRunningPrompt || _currentWorkEntry.IsPaused)
       {
         return;
       }

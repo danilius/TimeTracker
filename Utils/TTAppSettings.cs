@@ -19,6 +19,25 @@ namespace TimeTracker.Utils
     TwelveHour
   }
 
+  /// <summary>
+  /// What the window's close button does while the tray icon is available.
+  /// </summary>
+  public enum CloseButtonAction
+  {
+    MinimiseToTray,
+    ExitApplication
+  }
+
+  /// <summary>
+  /// How a job's billed duration is rounded. <see cref="None" /> bills the exact time.
+  /// </summary>
+  public enum BillingRoundingMode
+  {
+    None,
+    Nearest,
+    Up
+  }
+
   public class TTAppSettings
   {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -75,6 +94,55 @@ namespace TimeTracker.Utils
     {
       get { return _longRunningJobReminderMinutes; }
       set { _longRunningJobReminderMinutes = value; }
+    }
+
+    private bool _idleDetectionEnabled = true;
+    public bool IdleDetectionEnabled
+    {
+      get { return _idleDetectionEnabled; }
+      set { _idleDetectionEnabled = value; }
+    }
+
+    /// <summary>
+    /// How long the machine must sit without keyboard or mouse input before a running job is
+    /// treated as idle time worth asking about.
+    /// </summary>
+    private int _idleThresholdMinutes = 15;
+    public int IdleThresholdMinutes
+    {
+      get { return _idleThresholdMinutes; }
+      set { _idleThresholdMinutes = value; }
+    }
+
+    private bool _showTrayIcon = true;
+    public bool ShowTrayIcon
+    {
+      get { return _showTrayIcon; }
+      set { _showTrayIcon = value; }
+    }
+
+    private CloseButtonAction _closeButtonAction = CloseButtonAction.MinimiseToTray;
+    public CloseButtonAction CloseButtonAction
+    {
+      get { return _closeButtonAction; }
+      set { _closeButtonAction = value; }
+    }
+
+    /// <summary>
+    /// Default rounding for clients that do not set their own.
+    /// </summary>
+    private BillingRoundingMode _defaultRoundingMode = BillingRoundingMode.None;
+    public BillingRoundingMode DefaultRoundingMode
+    {
+      get { return _defaultRoundingMode; }
+      set { _defaultRoundingMode = value; }
+    }
+
+    private int _defaultRoundingMinutes = 15;
+    public int DefaultRoundingMinutes
+    {
+      get { return _defaultRoundingMinutes; }
+      set { _defaultRoundingMinutes = value; }
     }
 
     private decimal _defaultHourlyRate = 0;

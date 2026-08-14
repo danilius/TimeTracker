@@ -6,6 +6,8 @@
     <RootNamespace>TimeTracker</RootNamespace>
     <Nullable>enable</Nullable>
     <UseWPF>true</UseWPF>
+    <!-- For the notification tray icon: WPF has no equivalent of NotifyIcon. -->
+    <UseWindowsForms>true</UseWindowsForms>
     <ApplicationIcon>resources\time tracker icon.ico</ApplicationIcon>
   </PropertyGroup>
 

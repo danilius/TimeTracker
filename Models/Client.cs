@@ -118,6 +118,37 @@ namespace TimeTracker.Models
       }
     }
 
+    /// <summary>
+    /// How this client's jobs are rounded when billed. Defaults to the application setting.
+    /// </summary>
+    private BillingRoundingMode? _roundingMode;
+    public BillingRoundingMode? RoundingMode
+    {
+      get { return _roundingMode; }
+      set
+      {
+        if (_roundingMode != value)
+        {
+          _roundingMode = value;
+          OnPropertyChanged();
+        }
+      }
+    }
+
+    private int? _roundingMinutes;
+    public int? RoundingMinutes
+    {
+      get { return _roundingMinutes; }
+      set
+      {
+        if (_roundingMinutes != value)
+        {
+          _roundingMinutes = value;
+          OnPropertyChanged();
+        }
+      }
+    }
+
     private string _defaultCurrency = string.Empty;
     public string DefaultCurrency
     {

@@ -66,8 +66,7 @@ namespace TimeTracker.Controls
           dialog.Description,
           dialog.HourlyRate,
           dialog.Currency,
-          dialog.Duration,
-          dialog.IsBillable);
+          dialog.Duration);
       }
     }
   }

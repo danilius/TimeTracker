@@ -11,6 +11,10 @@
 
   <ItemGroup>
     <Compile Remove="Scratch\**\*.cs" />
+    <!-- The test project lives under Tests\ and is built separately; without this the app's
+         default globs would pull its sources in. -->
+    <Compile Remove="Tests\**" />
+    <None Remove="Tests\**" />
     <PackageReference Include="FastEnum" Version="1.8.0" />
     <PackageReference Include="LiteDB" Version="5.0.16" />
   </ItemGroup>

@@ -38,6 +38,11 @@ namespace TimeTracker.Utils
       _settings = settings;
     }
 
+    /// <summary>
+    /// Roll the log over once it passes this size, so a repeating fault cannot fill the disk.
+    /// </summary>
+    private const long MaximumLogBytes = 1024 * 1024;
+
     public void LogEvent(string message)
     {
       lock (_locker)
@@ -45,11 +50,45 @@ namespace TimeTracker.Utils
 
         if (_settings != null && !string.IsNullOrEmpty(_settings.LogFilePath))
         {
+          RollLogIfOversized(_settings.LogFilePath);
+
           // append the log message to the log file
           using StreamWriter sw = File.AppendText(_settings.LogFilePath);
           sw.WriteLine($"{DateTime.Now:dd-MM-yyyy HH:mm:ss} - {message}");
           sw.Close();
         }
+      }
+    }
+
+    /// <summary>
+    /// Keeps the current log and one previous generation. Logging must never throw, so any
+    /// failure here is swallowed and the caller simply appends to the existing file.
+    /// </summary>
+    private static void RollLogIfOversized(string logFilePath)
+    {
+      try
+      {
+        FileInfo logFile = new(logFilePath);
+
+        if (!logFile.Exists || logFile.Length < MaximumLogBytes)
+        {
+          return;
+        }
+
+        string previousPath = logFilePath + ".1";
+
+        if (File.Exists(previousPath))
+        {
+          File.Delete(previousPath);
+        }
+
+        File.Move(logFilePath, previousPath);
+      }
+      catch (IOException)
+      {
+      }
+      catch (UnauthorizedAccessException)
+      {
       }
     }
   }

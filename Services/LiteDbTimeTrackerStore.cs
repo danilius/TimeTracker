@@ -11,6 +11,7 @@ namespace TimeTracker.Services
   {
     private const string DataCollectionName = "app_data";
     private const string DataRecordID = "main";
+    private const int BackupsToKeep = 10;
 
     public TimeTrackerData LoadData()
     {
@@ -42,6 +43,74 @@ namespace TimeTracker.Services
     {
       string dataFolder = GetDataFolderPath();
       return Path.Combine(dataFolder, "tt_data.db");
+    }
+
+    /// <summary>
+    /// Copies the data file into the backup folder once per day and keeps the most recent
+    /// <see cref="BackupsToKeep" /> copies. Everything lives in a single record that is rewritten
+    /// on every save, so one bad write would otherwise take the whole billing history with it.
+    /// </summary>
+    /// <returns>The backup written, or null when nothing needed doing or the copy failed.</returns>
+    public static string? CreateDailyBackup()
+    {
+      try
+      {
+        string databaseFile = GetDatabaseFilePath();
+
+        if (!File.Exists(databaseFile))
+        {
+          return null;
+        }
+
+        string backupFolder = GetBackupFolderPath();
+        Directory.CreateDirectory(backupFolder);
+
+        string backupPath = Path.Combine(backupFolder, $"tt_data-{DateTime.Now:yyyyMMdd}.db");
+
+        if (File.Exists(backupPath))
+        {
+          return null;
+        }
+
+        File.Copy(databaseFile, backupPath);
+        PruneBackups(backupFolder);
+
+        return backupPath;
+      }
+      catch (IOException)
+      {
+        return null;
+      }
+      catch (UnauthorizedAccessException)
+      {
+        return null;
+      }
+    }
+
+    private static void PruneBackups(string backupFolder)
+    {
+      // Dated names sort chronologically, so the newest are simply the last by name.
+      string[] backups = Directory.GetFiles(backupFolder, "tt_data-*.db");
+      Array.Sort(backups, StringComparer.OrdinalIgnoreCase);
+
+      for (int index = 0; index < backups.Length - BackupsToKeep; index++)
+      {
+        try
+        {
+          File.Delete(backups[index]);
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+      }
+    }
+
+    public static string GetBackupFolderPath()
+    {
+      return Path.Combine(GetDataFolderPath(), "backups");
     }
 
     public static string GetLegacyJsonDataFilePath()

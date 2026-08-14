@@ -59,7 +59,6 @@ namespace TimeTracker.Dialogs
         : workEntry.EndTime;
       HourlyRateTextBox.Text = workEntry.HourlyRate.ToString("0.##");
       CurrencyComboBox.Text = workEntry.Currency;
-      BillableToggle.IsChecked = workEntry.IsBillable;
 
       UpdateDurationDisplay();
     }
@@ -78,7 +77,6 @@ namespace TimeTracker.Dialogs
     public string Currency { get; private set; } = string.Empty;
     public DateTime StartTime { get; private set; }
     public TimeSpan? Duration { get; private set; }
-    public bool IsBillable { get; private set; } = true;
     public bool StartTimerNow { get; private set; }
 
     private void LoadCombos()
@@ -181,84 +179,13 @@ namespace TimeTracker.Dialogs
 
     private static string FormatDuration(TimeSpan duration)
     {
-      int hours = (int)duration.TotalHours;
-      int minutes = duration.Minutes;
-
-      if (hours > 0 && minutes > 0)
-      {
-        return $"{hours}h {minutes}m";
-      }
-
-      return hours > 0 ? $"{hours}h" : $"{minutes}m";
+      return DurationText.Format(duration);
     }
 
     private static bool TryParseDuration(string text, out TimeSpan duration)
     {
-      duration = TimeSpan.Zero;
-
-      if (string.IsNullOrWhiteSpace(text))
-      {
-        return false;
-      }
-
-      text = text.Trim();
-
-      if (text.Contains(':') && TimeSpan.TryParse(text, CultureInfo.CurrentCulture, out duration))
-      {
-        return duration >= TimeSpan.Zero;
-      }
-
-      MatchCollection matches = Regex.Matches(
-        text,
-        @"(?<value>\d+(?:[\.,]\d+)?)\s*(?<unit>h|hr|hrs|hour|hours|m|min|mins|minute|minutes)\b",
-        RegexOptions.IgnoreCase);
-
-      if (matches.Count > 0)
-      {
-        string remainder = Regex.Replace(
-          text,
-          @"(?<value>\d+(?:[\.,]\d+)?)\s*(?<unit>h|hr|hrs|hour|hours|m|min|mins|minute|minutes)\b",
-          string.Empty,
-          RegexOptions.IgnoreCase);
-
-        if (!string.IsNullOrWhiteSpace(remainder))
-        {
-          return false;
-        }
-
-        double totalMinutes = 0;
-        foreach (Match match in matches.Cast<Match>())
-        {
-          if (!TryParseFlexibleDouble(match.Groups["value"].Value, out double value))
-          {
-            return false;
-          }
-
-          string unit = match.Groups["unit"].Value.ToLowerInvariant();
-          totalMinutes += unit.StartsWith("h", StringComparison.Ordinal)
-            ? value * 60
-            : value;
-        }
-
-        duration = TimeSpan.FromMinutes(totalMinutes);
-        return duration >= TimeSpan.Zero;
-      }
-
-      if (TryParseFlexibleDouble(text, out double hours))
-      {
-        duration = TimeSpan.FromHours(hours);
-        return duration >= TimeSpan.Zero;
-      }
-
-      return false;
+      return DurationText.TryParse(text, out duration);
     }
-
-    private static bool TryParseFlexibleDouble(string text, out double value)
-    {
-      return double.TryParse(text, NumberStyles.Number, CultureInfo.CurrentCulture, out value)
-        || double.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture, out value);
-    }
-
     private void ClientComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
       if (ClientComboBox.SelectedItem is not Client selectedClient)
@@ -436,7 +363,6 @@ namespace TimeTracker.Dialogs
 
       HourlyRate = hourlyRate;
       Currency = TTAppSettings.NormalizeCurrency(CurrencyComboBox.Text);
-      IsBillable = BillableToggle.IsChecked == true;
       StartTime = StartTimePicker.SelectedDate;
 
       DialogResult = true;

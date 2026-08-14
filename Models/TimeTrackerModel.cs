@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Windows;
 using System.Windows.Media;
@@ -21,35 +22,53 @@ namespace TimeTracker.Models
     private TimeTrackerData _data = new();
     private WorkEntry? _currentWorkEntry = null;
     private DateTime? _lastLongRunningWarningTime;
+    private bool _isShowingLongRunningPrompt;
+    private DateTime _lastRunningWorkSaveTime = DateTime.MinValue;
+
+    /// <summary>
+    /// How often a running job is written to disk by the timer. Starting, stopping and editing
+    /// all save immediately, so this only bounds what an unclean shutdown can lose.
+    /// </summary>
+    private static readonly TimeSpan RunningWorkSaveInterval = TimeSpan.FromSeconds(60);
 
     private TimeTrackerModel()
     {
       _workTimer = new() { Interval = TimeSpan.FromSeconds(TTAppSettings.Instance.TimerInterval) };
       _workTimer.Tick += WorkTimer_Tick;
 
+      LiteDbTimeTrackerStore.CreateDailyBackup();
       LoadData();
 
       //_projects.CollectionChanged += Projects_CollectionChanged;
       //_workEntries.CollectionChanged += WorkEntries_CollectionChanged;
     }
 
-    //private DateTime _lastSaveTime = DateTime.Now;
-    // timer event handler
     private void WorkTimer_Tick(object? sender, EventArgs e)
     {
       // set the current duration of the current work entry
-      if (_currentWorkEntry != null)
+      if (_currentWorkEntry == null)
       {
-        _currentWorkEntry.EndTime = DateTime.Now;
-        CheckLongRunningJobPolicy();
+        return;
       }
 
-      // if the Client list has not been saved in the last 5 minutes, then save it
-      //if (DateTime.Now.Subtract(_lastSaveTime).TotalMinutes > 5)
-      //{
-      SaveData();
-      //_lastSaveTime = DateTime.Now;
-      //}
+      _currentWorkEntry.EndTime = DateTime.Now;
+      CheckLongRunningJobPolicy();
+
+      if (_currentWorkEntry == null)
+      {
+        // The policy stopped the job, which saved on its way out.
+        return;
+      }
+
+      // The tick exists to drive the on-screen clock. Saving here rewrites the entire dataset
+      // and reopens the database, so it runs on its own slower schedule: a crash costs at most
+      // RunningWorkSaveInterval of the running job, rather than the file being rewritten every
+      // second the timer is going.
+      if (DateTime.Now - _lastRunningWorkSaveTime >= RunningWorkSaveInterval)
+      {
+        _lastRunningWorkSaveTime = DateTime.Now;
+        SaveData();
+      }
     }
 
     private void SaveData()
@@ -329,6 +348,12 @@ namespace TimeTracker.Models
 
     public event EventHandler? RunningWorkChanged;
 
+    /// <summary>
+    /// Raised when a running job passes the long running threshold. The UI handles this by
+    /// prompting; with no handler the configured policy applies on its own.
+    /// </summary>
+    public event EventHandler<LongRunningJobEventArgs>? LongRunningJobDetected;
+
     public void StartWork(WorkEntry workEntry)
     {
       if (_currentWorkEntry != null)
@@ -339,6 +364,7 @@ namespace TimeTracker.Models
       _currentWorkEntry = workEntry;
       _currentWorkEntry.IsRunning = true;
       _lastLongRunningWarningTime = null;
+      _lastRunningWorkSaveTime = DateTime.Now;
 
       _workTimer.Start();
 
@@ -348,15 +374,27 @@ namespace TimeTracker.Models
 
     public void StopWork()
     {
+      StopWork(DateTime.Now);
+    }
+
+    /// <summary>
+    /// Stops the running job and records it as having ended at <paramref name="endTime" />, which
+    /// lets the long running prompt backdate a stop to the moment the threshold was reached.
+    /// </summary>
+    public void StopWork(DateTime endTime)
+    {
       if (_currentWorkEntry != null)
       {
-        _currentWorkEntry.EndTime = DateTime.Now;
+        _currentWorkEntry.EndTime = endTime < _currentWorkEntry.StartTime
+          ? _currentWorkEntry.StartTime
+          : endTime;
         _currentWorkEntry.IsRunning = false;
       }
 
       _workTimer.Stop();
       _currentWorkEntry = null;
       _lastLongRunningWarningTime = null;
+      _lastRunningWorkSaveTime = DateTime.MinValue;
 
       SaveData();
       RunningWorkChanged?.Invoke(this, EventArgs.Empty);
@@ -364,15 +402,15 @@ namespace TimeTracker.Models
 
     public event EventHandler<WorkEntryEventArgs>? WorkEntryAdded;
 
-    public WorkEntry CreateWorkEntry(string clientName, string projectName, DateTime startTime, string? description, decimal? hourlyRate = null, string? currency = null, TimeSpan? duration = null, bool isBillable = true)
+    public WorkEntry CreateWorkEntry(string clientName, string projectName, DateTime startTime, string? description, decimal? hourlyRate = null, string? currency = null, TimeSpan? duration = null)
     {
       Client client = FindOrCreateClient(clientName);
       Project project = FindOrCreateProject(client, projectName, description);
 
-      return CreateWorkEntry(project, startTime, description, hourlyRate, currency, duration, isBillable);
+      return CreateWorkEntry(project, startTime, description, hourlyRate, currency, duration);
     }
 
-    public WorkEntry CreateWorkEntry(Project project, DateTime startTime, string? description, decimal? hourlyRate = null, string? currency = null, TimeSpan? duration = null, bool isBillable = true)
+    public WorkEntry CreateWorkEntry(Project project, DateTime startTime, string? description, decimal? hourlyRate = null, string? currency = null, TimeSpan? duration = null)
     {
       TTAppSettings settings = TTAppSettings.Instance;
       Client? client = project.Client;
@@ -384,7 +422,6 @@ namespace TimeTracker.Models
         StartTime = startTime,
         EndTime = startTime + (duration ?? TimeSpan.Zero),
         Description = description,
-        IsBillable = isBillable,
         HourlyRate = hourlyRate ?? defaultHourlyRate,
         Currency = string.IsNullOrWhiteSpace(currency)
           ? (string.IsNullOrWhiteSpace(client?.DefaultCurrency) ? settings.DefaultCurrency : client.DefaultCurrency)
@@ -539,12 +576,22 @@ namespace TimeTracker.Models
       return currencies.Count == 1 ? currencies[0] : string.Join(", ", currencies);
     }
 
-    private static string CreateInvoiceNumber(Client client)
+    public static string CreateInvoiceNumber(Client client)
     {
-      string prefix = client.InvoiceNumberPrefix.Trim().TrimEnd('/');
+      return FormatInvoiceNumber(client.InvoiceNumberPrefix, client.CurrentInvoiceNumber);
+    }
+
+    /// <summary>
+    /// A client's invoice number: their prefix, a slash, then the running number. A missing prefix
+    /// leaves the bare number rather than a leading slash.
+    /// </summary>
+    public static string FormatInvoiceNumber(string? prefix, int number)
+    {
+      prefix = (prefix ?? string.Empty).Trim().TrimEnd('/');
+
       return string.IsNullOrWhiteSpace(prefix)
-        ? client.CurrentInvoiceNumber.ToString()
-        : $"{prefix}/{client.CurrentInvoiceNumber}";
+        ? number.ToString(CultureInfo.InvariantCulture)
+        : $"{prefix}/{number}";
     }
 
     public WorkEntry StartNewWorkEntryBasedOn(WorkEntry sourceWorkEntry)
@@ -586,7 +633,7 @@ namespace TimeTracker.Models
       SaveData();
     }
 
-    public void UpdateWorkEntry(WorkEntry workEntry, Project project, DateTime startTime, string? description, decimal hourlyRate, string currency, TimeSpan? duration = null, bool isBillable = true)
+    public void UpdateWorkEntry(WorkEntry workEntry, Project project, DateTime startTime, string? description, decimal hourlyRate, string currency, TimeSpan? duration = null)
     {
       if (workEntry.Project != project)
       {
@@ -611,7 +658,6 @@ namespace TimeTracker.Models
 
       workEntry.Description = description;
       workEntry.HourlyRate = hourlyRate;
-      workEntry.IsBillable = isBillable;
       workEntry.Currency = TTAppSettings.NormalizeCurrency(currency);
 
       if (!workEntry.IsRunning && workEntry.EndTime < workEntry.StartTime)
@@ -622,12 +668,12 @@ namespace TimeTracker.Models
       SaveData();
     }
 
-    public void UpdateWorkEntry(WorkEntry workEntry, string clientName, string projectName, DateTime startTime, string? description, decimal hourlyRate, string currency, TimeSpan? duration = null, bool isBillable = true)
+    public void UpdateWorkEntry(WorkEntry workEntry, string clientName, string projectName, DateTime startTime, string? description, decimal hourlyRate, string currency, TimeSpan? duration = null)
     {
       Client client = FindOrCreateClient(clientName);
       Project project = FindOrCreateProject(client, projectName, description);
 
-      UpdateWorkEntry(workEntry, project, startTime, description, hourlyRate, currency, duration, isBillable);
+      UpdateWorkEntry(workEntry, project, startTime, description, hourlyRate, currency, duration);
     }
 
     public void UpdateClient(Client client, string name, string address, string companyName = "", string email = "", string phone = "", string invoiceNumberPrefix = "", int currentInvoiceNumber = 1, decimal defaultHourlyRate = 0, string defaultCurrency = "")
@@ -879,103 +925,62 @@ namespace TimeTracker.Models
 
     private void CheckLongRunningJobPolicy()
     {
-      if (_currentWorkEntry == null)
+      if (_currentWorkEntry == null || _isShowingLongRunningPrompt)
       {
         return;
       }
 
       TTAppSettings settings = TTAppSettings.Instance;
-      TimeSpan runningTime = DateTime.Now - _currentWorkEntry.StartTime;
+      DateTime now = DateTime.Now;
+      int intervalMinutes = LongRunningJobPolicy.IntervalMinutes(
+        settings.LongRunningJobBehavior,
+        settings.LongRunningJobThresholdMinutes,
+        settings.LongRunningJobReminderMinutes);
 
-      if (runningTime.TotalMinutes < settings.LongRunningJobThresholdMinutes)
+      if (!LongRunningJobPolicy.ShouldWarn(
+        _currentWorkEntry.StartTime,
+        now,
+        _lastLongRunningWarningTime,
+        settings.LongRunningJobThresholdMinutes,
+        intervalMinutes))
       {
         return;
       }
 
-      if (!ShouldShowLongRunningWarning(settings))
+      DateTime cutoff = LongRunningJobPolicy.Cutoff(
+        _currentWorkEntry.StartTime,
+        now,
+        _lastLongRunningWarningTime,
+        settings.LongRunningJobThresholdMinutes,
+        intervalMinutes);
+      _lastLongRunningWarningTime = now;
+
+      bool allowContinue = settings.LongRunningJobBehavior != LongRunningJobBehavior.PromptAndStop;
+
+      // Asking the user is the UI's job. With no listener the default stands, which keeps the
+      // policy usable — and testable — without a window.
+      LongRunningJobEventArgs args = new(_currentWorkEntry, cutoff, allowContinue)
       {
-        return;
+        ContinueRunning = allowContinue
+      };
+
+      // The listener is expected to block on a modal prompt while the work timer keeps ticking,
+      // so re-entry is blocked until it returns.
+      _isShowingLongRunningPrompt = true;
+      try
+      {
+        LongRunningJobDetected?.Invoke(this, args);
+      }
+      finally
+      {
+        _isShowingLongRunningPrompt = false;
       }
 
-      _lastLongRunningWarningTime = DateTime.Now;
-
-      switch (settings.LongRunningJobBehavior)
+      if (!args.ContinueRunning)
       {
-        case LongRunningJobBehavior.PromptAndStop:
-          ShowLongRunningWarning("Job has run for more than an hour and will be stopped.");
-          StopWork();
-          break;
-
-        case LongRunningJobBehavior.RepeatReminder:
-        case LongRunningJobBehavior.PromptAndContinue:
-        default:
-          MessageBoxResult result = ShowLongRunningConfirmation();
-          if (result == MessageBoxResult.No)
-          {
-            StopWork();
-          }
-          break;
+        StopWork(cutoff);
       }
     }
 
-    private bool ShouldShowLongRunningWarning(TTAppSettings settings)
-    {
-      if (_lastLongRunningWarningTime == null)
-      {
-        return true;
-      }
-
-      TimeSpan timeSinceLastWarning = DateTime.Now - _lastLongRunningWarningTime.Value;
-      int reminderMinutes = settings.LongRunningJobBehavior == LongRunningJobBehavior.RepeatReminder
-        ? settings.LongRunningJobReminderMinutes
-        : settings.LongRunningJobThresholdMinutes;
-
-      return timeSinceLastWarning.TotalMinutes >= reminderMinutes;
-    }
-
-    private static MessageBoxResult ShowLongRunningConfirmation()
-    {
-      BringMainWindowToFront();
-
-      return MessageBox.Show(
-        Application.Current.MainWindow,
-        "Job has run for more than an hour, continue or stop?\n\nYes = continue\nNo = stop",
-        "Long running job",
-        MessageBoxButton.YesNo,
-        MessageBoxImage.Warning,
-        MessageBoxResult.Yes);
-    }
-
-    private static void ShowLongRunningWarning(string message)
-    {
-      BringMainWindowToFront();
-
-      MessageBox.Show(
-        Application.Current.MainWindow,
-        message,
-        "Long running job",
-        MessageBoxButton.OK,
-        MessageBoxImage.Warning);
-    }
-
-    private static void BringMainWindowToFront()
-    {
-      Window? mainWindow = Application.Current.MainWindow;
-
-      if (mainWindow == null)
-      {
-        return;
-      }
-
-      if (mainWindow.WindowState == WindowState.Minimized)
-      {
-        mainWindow.WindowState = WindowState.Normal;
-      }
-
-      mainWindow.Activate();
-      mainWindow.Topmost = true;
-      mainWindow.Topmost = false;
-      mainWindow.Focus();
-    }
   }
 }

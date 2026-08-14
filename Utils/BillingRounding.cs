@@ -2,15 +2,6 @@ using System;
 
 namespace TimeTracker.Utils
 {
-  // TODO: this enum was specified as already living in TTAppSettings.cs, but it is not present on
-  // this branch. Delete it from here as soon as the settings copy lands, or the two will collide.
-  public enum BillingRoundingMode
-  {
-    None,
-    Nearest,
-    Up
-  }
-
   /// <summary>
   /// Rounding a tracked duration to a billing granularity. Kept free of settings and storage types
   /// so the rules can be exercised directly.

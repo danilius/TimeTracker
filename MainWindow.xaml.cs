@@ -14,6 +14,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Data;
 using System.Windows.Documents;
 using System.Windows.Input;
+using System.Printing;
 using System.Windows.Media;
 using System.Windows.Threading;
 using System.Windows.Automation;
@@ -67,6 +68,10 @@ namespace TimeTracker
     private TextBlock? jobsActiveTimerTextBlock;
     private TextBlock? jobsRecentSubtitleTextBlock;
     private ScrollViewer? jobsRecentTableScroll;
+    private TrayIconHost? trayIcon;
+    private bool isExitingApplication;
+    private bool hasExplainedTrayMinimise;
+    private WindowState windowStateBeforeTray = WindowState.Normal;
     private static readonly Brush AccentBrush = Palette.Accent;
     private static readonly Brush PrimaryTextBrush = Palette.PrimaryText;
     private static readonly Brush SecondaryTextBrush = Palette.SecondaryText;
@@ -86,7 +91,169 @@ namespace TimeTracker
 
       RestoreWindowState();
       RestoreNavigationState();
+
+      // Before the first page is built: the Jobs toolbar asks whether a tray icon exists.
+      InitializeTrayIcon();
       ShowSavedPage();
+    }
+
+    /// <summary>
+    /// Creates the notification area icon when the setting asks for one. Nothing else in the window
+    /// assumes the icon exists: with the setting off, <see cref="trayIcon" /> stays null and the
+    /// close button and the tray menu simply fall back to a plain exit.
+    /// </summary>
+    private void InitializeTrayIcon()
+    {
+      if (!TTAppSettings.Instance.ShowTrayIcon)
+      {
+        return;
+      }
+
+      trayIcon = new TrayIconHost(BuildTrayTooltip());
+      trayIcon.OpenRequested += TrayIcon_OpenRequested;
+      trayIcon.StopTimerRequested += TrayIcon_StopTimerRequested;
+      trayIcon.PauseResumeRequested += TrayIcon_PauseResumeRequested;
+      trayIcon.ExitRequested += TrayIcon_ExitRequested;
+      trayIcon.Show();
+      UpdateTrayState();
+    }
+
+    /// <summary>
+    /// Applies the "Show tray icon" setting to a window that is already open, so the choice takes
+    /// effect without a restart.
+    /// </summary>
+    private void ApplyTrayIconSetting()
+    {
+      if (TTAppSettings.Instance.ShowTrayIcon)
+      {
+        if (trayIcon == null)
+        {
+          InitializeTrayIcon();
+        }
+
+        return;
+      }
+
+      // Turning the icon off while the window is hidden would leave no way back to it.
+      if (!IsVisible)
+      {
+        RestoreFromTray();
+      }
+
+      DisposeTrayIcon();
+    }
+
+    public void DisposeTrayIcon()
+    {
+      if (trayIcon == null)
+      {
+        return;
+      }
+
+      trayIcon.OpenRequested -= TrayIcon_OpenRequested;
+      trayIcon.StopTimerRequested -= TrayIcon_StopTimerRequested;
+      trayIcon.PauseResumeRequested -= TrayIcon_PauseResumeRequested;
+      trayIcon.ExitRequested -= TrayIcon_ExitRequested;
+      trayIcon.Dispose();
+      trayIcon = null;
+    }
+
+    private void UpdateTrayState()
+    {
+      if (trayIcon == null)
+      {
+        return;
+      }
+
+      trayIcon.SetTooltip(BuildTrayTooltip());
+      trayIcon.SetStopTimerEnabled(timeTracker.HasRunningWork);
+      trayIcon.SetPauseState(timeTracker.HasPausedWork, timeTracker.HasRunningWork);
+    }
+
+    private string BuildTrayTooltip()
+    {
+      WorkEntry? currentWorkEntry = timeTracker.CurrentWorkEntry;
+
+      if (currentWorkEntry == null)
+      {
+        return "Time Tracker - no timer running";
+      }
+
+      string job = string.IsNullOrWhiteSpace(currentWorkEntry.ProjectName)
+        ? currentWorkEntry.ClientName
+        : $"{currentWorkEntry.ClientName} - {currentWorkEntry.ProjectName}";
+
+      // The host clamps to the 63 characters the Win32 tooltip buffer allows.
+      return timeTracker.HasPausedWork ? $"Paused: {job}" : $"Running: {job}";
+    }
+
+    private void TrayIcon_OpenRequested(object? sender, EventArgs e)
+    {
+      RestoreFromTray();
+    }
+
+    private void TrayIcon_StopTimerRequested(object? sender, EventArgs e)
+    {
+      timeTracker.StopWork();
+      RefreshJobsPageAfterTimerChange();
+    }
+
+    private void TrayIcon_PauseResumeRequested(object? sender, EventArgs e)
+    {
+      TogglePauseResume();
+    }
+
+    /// <summary>
+    /// Exiting from the tray menu is a real exit: it goes through <see cref="Window_Closing" /> so
+    /// the running job confirmation and the save on the way out both still happen.
+    /// </summary>
+    private void TrayIcon_ExitRequested(object? sender, EventArgs e)
+    {
+      // The confirmation needs a window the user can actually see it in front of.
+      if (!IsVisible && timeTracker.HasRunningWork)
+      {
+        RestoreFromTray();
+      }
+
+      isExitingApplication = true;
+      Close();
+    }
+
+    /// <summary>
+    /// Brings the window back from the notification area. Also what a second instance triggers, so
+    /// starting the application again always surfaces the copy that is already running.
+    /// </summary>
+    public void RestoreFromTray()
+    {
+      Show();
+      WindowState = windowStateBeforeTray == WindowState.Maximized
+        ? WindowState.Maximized
+        : WindowState.Normal;
+      Activate();
+    }
+
+    private void MinimiseToTray()
+    {
+      if (trayIcon == null)
+      {
+        return;
+      }
+
+      // Remember the size and position now: hiding the window is where the user last chose them.
+      SaveWindowState();
+      windowStateBeforeTray = WindowState == WindowState.Minimized ? WindowState.Normal : WindowState;
+      Hide();
+
+      if (!hasExplainedTrayMinimise)
+      {
+        hasExplainedTrayMinimise = true;
+        trayIcon.ShowBalloon("Time Tracker", "Still running here. Double-click the icon to open it again.");
+      }
+    }
+
+    private bool ShouldMinimiseToTrayOnClose()
+    {
+      return trayIcon != null && TTAppSettings.Instance.CloseButtonAction == CloseButtonAction.MinimiseToTray;
     }
 
     private void HamburgerButton_Click(object sender, RoutedEventArgs e)
@@ -143,6 +310,8 @@ namespace TimeTracker
 
     private void TimeTracker_RunningWorkChanged(object? sender, EventArgs e)
     {
+      UpdateTrayState();
+
       if (isCompactJobsMode)
       {
         Content = CreateCompactJobsMonitorContent();
@@ -150,6 +319,47 @@ namespace TimeTracker
       }
 
       UpdateJobsTimerText();
+    }
+
+    /// <summary>
+    /// Pauses or resumes the running job. The model keeps the pause out of the billable duration,
+    /// so the clock on the card stops on its own while a pause is open.
+    /// </summary>
+    private void TogglePauseResume()
+    {
+      if (!timeTracker.HasRunningWork)
+      {
+        return;
+      }
+
+      if (timeTracker.HasPausedWork)
+      {
+        timeTracker.ResumeWork();
+      }
+      else
+      {
+        timeTracker.PauseWork();
+      }
+
+      RefreshJobsPageAfterTimerChange();
+    }
+
+    /// <summary>
+    /// Rebuilds whatever is on screen after the timer was started, stopped or paused from somewhere
+    /// other than the page itself - the tray menu, for instance.
+    /// </summary>
+    private void RefreshJobsPageAfterTimerChange()
+    {
+      if (isCompactJobsMode)
+      {
+        Content = CreateCompactJobsMonitorContent();
+        return;
+      }
+
+      if (TTAppSettings.Instance.CurrentPage == JobsPage)
+      {
+        ShowHome();
+      }
     }
 
     private void JobsPageTimer_Tick(object? sender, EventArgs e)
@@ -1290,6 +1500,13 @@ namespace TimeTracker
       compactButton.ToolTip = "Compact Jobs Monitor";
       toolbar.Children.Add(compactButton);
 
+      // With the close button set to exit, the tray is otherwise unreachable, so the toolbar is
+      // where the user gets to put the window away without stopping the timer.
+      if (trayIcon != null && TTAppSettings.Instance.CloseButtonAction == CloseButtonAction.ExitApplication)
+      {
+        toolbar.Children.Add(CreateJobsIconButton("\uE921", (_, _) => MinimiseToTray()));
+      }
+
       Button newJobButton = new()
       {
         Content = "+  New job",
@@ -1610,7 +1827,10 @@ namespace TimeTracker
       content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
       panel.Child = content;
 
-      TextBlock status = CreateStatusTitle("Active timer", timeTracker.HasRunningWork ? SuccessBrush : SecondaryTextBrush);
+      bool isPaused = timeTracker.HasPausedWork;
+      TextBlock status = CreateStatusTitle(
+        isPaused ? "Paused" : "Active timer",
+        isPaused ? WarningBrush : timeTracker.HasRunningWork ? SuccessBrush : SecondaryTextBrush);
       status.FontSize = 15;
       content.Children.Add(status);
 
@@ -1660,13 +1880,24 @@ namespace TimeTracker
       actions.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
       actions.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
+      StackPanel timerActions = new()
+      {
+        Orientation = Orientation.Horizontal
+      };
       Button stopButton = CreatePanelActionButton("Stop", true, (_, _) =>
       {
         timeTracker.StopWork();
         Content = CreateCompactJobsMonitorContent();
       }, "DangerButtonStyle", timeTracker.HasRunningWork);
-      stopButton.Margin = new Thickness(0, 0, 10, 0);
-      actions.Children.Add(stopButton);
+      stopButton.Margin = new Thickness(0, 0, 8, 0);
+      stopButton.MinWidth = 64;
+      timerActions.Children.Add(stopButton);
+
+      Button pauseButton = CreatePanelActionButton(isPaused ? "Resume" : "Pause", false, (_, _) => TogglePauseResume(), null, timeTracker.HasRunningWork);
+      pauseButton.Margin = new Thickness(0, 0, 8, 0);
+      pauseButton.MinWidth = 72;
+      timerActions.Children.Add(pauseButton);
+      actions.Children.Add(timerActions);
 
       Button restoreButton = CreatePanelActionButton("Restore", false, (_, _) => ExitCompactJobsMode());
       restoreButton.Content = CreateIconTextContent("\uE73F", "Restore");
@@ -1713,8 +1944,11 @@ namespace TimeTracker
     {
       Border panel = CreatePanelBorder();
       WorkEntry? currentWorkEntry = timeTracker.CurrentWorkEntry;
+      bool isPaused = timeTracker.HasPausedWork;
       StackPanel content = new();
-      content.Children.Add(CreateStatusTitle("Active timer", timeTracker.HasRunningWork ? SuccessBrush : SecondaryTextBrush));
+      content.Children.Add(CreateStatusTitle(
+        isPaused ? "Paused" : "Active timer",
+        isPaused ? WarningBrush : timeTracker.HasRunningWork ? SuccessBrush : SecondaryTextBrush));
 
       if (currentWorkEntry == null)
       {
@@ -1754,6 +1988,20 @@ namespace TimeTracker
         Margin = new Thickness(0, 18, 0, 14)
       };
       content.Children.Add(jobsActiveTimerTextBlock);
+
+      if (isPaused)
+      {
+        // The clock above has stopped moving, which on its own reads like a bug. Say why.
+        content.Children.Add(new TextBlock
+        {
+          Text = "Paused - the clock is not counting this time.",
+          Foreground = WarningBrush,
+          FontWeight = FontWeights.SemiBold,
+          Margin = new Thickness(0, 0, 0, 12),
+          TextWrapping = TextWrapping.Wrap
+        });
+      }
+
       content.Children.Add(new TextBlock
       {
         Text = currentWorkEntry.ClientName,
@@ -1786,6 +2034,7 @@ namespace TimeTracker
         timeTracker.StopWork();
         ShowHome();
       }, "DangerButtonStyle"));
+      actions.Children.Add(CreatePanelActionButton(isPaused ? "Resume" : "Pause", false, (_, _) => TogglePauseResume()));
       content.Children.Add(actions);
 
       panel.Child = content;
@@ -1959,7 +2208,7 @@ namespace TimeTracker
         new TableColumn<WorkEntry>("Last entry", 1.25, job => CreateJobsTextCell(FormatDateTime(job.StartTime), false)),
         new TableColumn<WorkEntry>("Duration", 0.85, job => CreateJobsTextCell(FormatDurationShort(job.Duration), true)),
         new TableColumn<WorkEntry>("Rate", 0.8, job => CreateJobsTextCell(FormatRate(job), false)),
-        new TableColumn<WorkEntry>("Status", 0.9, job => CreateStatusBadge(job.IsRunning ? "Running" : job.Duration > TimeSpan.Zero ? "Ready" : "Draft", job.IsRunning)),
+        new TableColumn<WorkEntry>("Status", 0.9, job => CreateStatusBadge(DescribeJobStatus(job), job.IsRunning)),
         new TableColumn<WorkEntry>("Actions", 1.05, CreateJobActionsCell)
       };
     }
@@ -2033,6 +2282,20 @@ namespace TimeTracker
       return cell;
     }
 
+    /// <summary>
+    /// A paused job is still the running job as far as the model is concerned, so it has to be
+    /// called out separately or the table shows it merrily counting up.
+    /// </summary>
+    private static string DescribeJobStatus(WorkEntry job)
+    {
+      if (job.IsRunning)
+      {
+        return job.IsPaused ? "Paused" : "Running";
+      }
+
+      return job.Duration > TimeSpan.Zero ? "Ready" : "Draft";
+    }
+
     private static Border CreateStatusBadge(string text, int column, bool isRunning)
     {
       Border badge = CreateStatusBadge(text, isRunning);
@@ -2042,7 +2305,10 @@ namespace TimeTracker
 
     private static Border CreateStatusBadge(string text, bool isRunning)
     {
-      Brush statusBrush = isRunning || text == "Active" ? SuccessBrush : text == "Ready" ? AccentBrush : SecondaryTextBrush;
+      Brush statusBrush = text == "Paused" ? WarningBrush
+        : isRunning || text == "Active" ? SuccessBrush
+        : text == "Ready" ? AccentBrush
+        : SecondaryTextBrush;
       Border badge = new()
       {
         Background = WithOpacity(statusBrush, 0.12),
@@ -2128,7 +2394,8 @@ namespace TimeTracker
       [""] = "Start",
       [""] = "Save a copy",
       [""] = "Compact Jobs Monitor",
-      [""] = "Show jobs"
+      [""] = "Show jobs",
+      [""] = "Minimise to tray"
     };
 
     private static void DescribeIconButton(Button button, string icon)
@@ -3014,7 +3281,11 @@ namespace TimeTracker
         TimesheetColumns(),
         "No time sheet entries yet.",
         selectedEntries,
-        entry => entry.IsRunning ? WithOpacity(SuccessBrush, 0.08) : Brushes.White,
+        // A paused entry gets the warning tint rather than the running green, so the row does not
+        // claim to be accruing time it is not accruing.
+        entry => entry.IsRunning
+          ? entry.IsPaused ? WithOpacity(WarningBrush, 0.12) : WithOpacity(SuccessBrush, 0.08)
+          : Brushes.White,
         entry =>
         {
           EditWorkEntry(entry);
@@ -3540,7 +3811,7 @@ namespace TimeTracker
         return;
       }
 
-      SaveJobsWordDocument(
+      bool saved = TryWriteExportFile("Save Invoice", filePath, () => SaveJobsWordDocument(
         filePath,
         $"Invoice {invoice.InvoiceNumber}",
         timeTracker.GetInvoiceJobs(invoice),
@@ -3551,7 +3822,12 @@ namespace TimeTracker
         client?.Address ?? string.Empty,
         invoice.IssueDate,
         true,
-        TTAppSettings.Instance.WordTemplatePath);
+        TTAppSettings.Instance.WordTemplatePath));
+
+      if (!saved)
+      {
+        return;
+      }
 
       TTAppSettings.Instance.LastInvoiceFolder = Path.GetDirectoryName(filePath) ?? string.Empty;
       TTAppSettings.Instance.Save();
@@ -3566,7 +3842,7 @@ namespace TimeTracker
         return;
       }
 
-      SaveJobsWordDocument(
+      bool saved = TryWriteExportFile("Save Report", filePath, () => SaveJobsWordDocument(
         filePath,
         report.Name,
         timeTracker.GetReportJobs(report),
@@ -3578,7 +3854,12 @@ namespace TimeTracker
         null,
         false,
         TTAppSettings.Instance.ReportTemplatePath,
-        "ReportTemplateExample.docx");
+        "ReportTemplateExample.docx"));
+
+      if (!saved)
+      {
+        return;
+      }
 
       TTAppSettings.Instance.LastReportFolder = Path.GetDirectoryName(filePath) ?? string.Empty;
       TTAppSettings.Instance.Save();
@@ -3607,11 +3888,6 @@ namespace TimeTracker
       return accepted;
     }
 
-    /// <summary>
-    /// Exports work entries as CSV. The Word exports let a write failure reach the crash handler,
-    /// which kills the app; an export the user can simply retry does not deserve that, so a locked
-    /// or unwritable file is reported and the session carries on.
-    /// </summary>
     private void SaveWorkEntryCsv(string title, string suggestedName, IEnumerable<WorkEntry> workEntries)
     {
       string suggestedFileName = $"{SanitizeFileName(suggestedName)}.csv";
@@ -3621,24 +3897,43 @@ namespace TimeTracker
         return;
       }
 
-      try
+      if (!TryWriteExportFile(title, filePath, () => CsvExport.WriteWorkEntryCsv(filePath, workEntries)))
       {
-        CsvExport.WriteWorkEntryCsv(filePath, workEntries);
-      }
-      catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException)
-      {
-        Logger.Instance.LogEvent($"CSV export to {filePath} failed: {exception}");
-        MessageBox.Show(
-          this,
-          $"Could not save the CSV file.{Environment.NewLine}{Environment.NewLine}{exception.Message}",
-          title,
-          MessageBoxButton.OK,
-          MessageBoxImage.Warning);
         return;
       }
 
       TTAppSettings.Instance.LastCsvFolder = Path.GetDirectoryName(filePath) ?? string.Empty;
       TTAppSettings.Instance.Save();
+    }
+
+    /// <summary>
+    /// Runs an export. Left alone, a target file open in Word, a read-only folder or an unreadable
+    /// template reaches the dispatcher handler, which shuts the application down and takes the
+    /// running timer's unsaved minutes with it. An export the user can simply retry does not
+    /// deserve that, so the failure is reported and the session carries on.
+    /// </summary>
+    /// <returns>True when the file was written.</returns>
+    private bool TryWriteExportFile(string title, string filePath, Action write)
+    {
+      try
+      {
+        write();
+        return true;
+      }
+      // InvalidDataException is listed separately because, despite living in System.IO, it derives
+      // from SystemException rather than IOException. A template that is not a readable Word
+      // package throws it, which is exactly the case this guard exists for.
+      catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException or InvalidDataException)
+      {
+        Logger.Instance.LogEvent($"Export to {filePath} failed: {exception}");
+        MessageBox.Show(
+          this,
+          $"Could not save {Path.GetFileName(filePath)}.{Environment.NewLine}{Environment.NewLine}{exception.Message}",
+          title,
+          MessageBoxButton.OK,
+          MessageBoxImage.Warning);
+        return false;
+      }
     }
 
     /// <summary>
@@ -4367,7 +4662,23 @@ namespace TimeTracker
       document.PageHeight = printDialog.PrintableAreaHeight;
       document.PageWidth = printDialog.PrintableAreaWidth;
       document.ColumnWidth = printDialog.PrintableAreaWidth;
-      printDialog.PrintDocument(((IDocumentPaginatorSource)document).DocumentPaginator, "Time Tracker");
+
+      // Printing to a queue that has gone away, or to a "print to file" target that is locked, is
+      // the same class of recoverable failure as a locked export: report it and stay running.
+      try
+      {
+        printDialog.PrintDocument(((IDocumentPaginatorSource)document).DocumentPaginator, "Time Tracker");
+      }
+      catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException or PrintQueueException)
+      {
+        Logger.Instance.LogEvent($"Printing failed: {exception}");
+        MessageBox.Show(
+          this,
+          $"Could not print the document.{Environment.NewLine}{Environment.NewLine}{exception.Message}",
+          "Print",
+          MessageBoxButton.OK,
+          MessageBoxImage.Warning);
+      }
     }
 
     private void ShowArchive()
@@ -4632,6 +4943,49 @@ namespace TimeTracker
       idleDetectionCheckBox.Checked += (_, _) => SaveIdleSettingsIfValid(idleDetectionCheckBox, idleThresholdTextBox, false);
       idleDetectionCheckBox.Unchecked += (_, _) => SaveIdleSettingsIfValid(idleDetectionCheckBox, idleThresholdTextBox, false);
       idleThresholdTextBox.LostFocus += (_, _) => SaveIdleSettingsIfValid(idleDetectionCheckBox, idleThresholdTextBox, true);
+
+      panel.Children.Add(CreateSettingsHeading("Tray icon"));
+
+      CheckBox showTrayIconCheckBox = new()
+      {
+        Content = "Show Time Tracker in the notification area",
+        IsChecked = settings.ShowTrayIcon,
+        Margin = new Thickness(0, 0, 0, 12),
+        HorizontalAlignment = HorizontalAlignment.Left
+      };
+      panel.Children.Add(showTrayIconCheckBox);
+
+      ComboBox closeButtonActionComboBox = new()
+      {
+        ItemsSource = CloseButtonActionOption.All,
+        SelectedItem = CloseButtonActionOption.All.First(option => option.Value == settings.CloseButtonAction),
+        DisplayMemberPath = nameof(CloseButtonActionOption.DisplayName),
+        Margin = new Thickness(0, 0, 0, 12),
+        Width = 260,
+        HorizontalAlignment = HorizontalAlignment.Left
+      };
+      panel.Children.Add(CreateSettingsLabel("When the window is closed"));
+      panel.Children.Add(closeButtonActionComboBox);
+
+      // Without the icon there is nowhere to minimise to, so the choice is meaningless.
+      void UpdateCloseButtonActionState()
+      {
+        closeButtonActionComboBox.IsEnabled = showTrayIconCheckBox.IsChecked == true;
+      }
+
+      void SaveTraySettings()
+      {
+        settings.ShowTrayIcon = showTrayIconCheckBox.IsChecked == true;
+        settings.CloseButtonAction = ((CloseButtonActionOption)closeButtonActionComboBox.SelectedItem).Value;
+        settings.Save();
+        UpdateCloseButtonActionState();
+        ApplyTrayIconSetting();
+      }
+
+      showTrayIconCheckBox.Checked += (_, _) => SaveTraySettings();
+      showTrayIconCheckBox.Unchecked += (_, _) => SaveTraySettings();
+      closeButtonActionComboBox.SelectionChanged += (_, _) => SaveTraySettings();
+      UpdateCloseButtonActionState();
 
       panel.Children.Add(new TextBlock
       {
@@ -5379,22 +5733,23 @@ namespace TimeTracker
       };
       TextBox roundingMinutesTextBox = CreateDialogTextBox(client?.RoundingMinutes?.ToString() ?? string.Empty);
 
+      roundingMinutesTextBox.ToolTip = "Leave blank to use the default from Settings.";
+
+      // Name, company and address earn a full row; everything else here is a few characters wide,
+      // so the short fields pair up rather than stretching the dialog down the screen.
       bool accepted = ShowSimpleForm(
         client == null ? "New client" : "Edit client",
-        new[]
+        new IReadOnlyList<(string Label, Control Input)>[]
         {
-          ("Name", (Control)nameTextBox),
-          ("Company name", (Control)companyNameTextBox),
-          ("Email", (Control)emailTextBox),
-          ("Phone", (Control)phoneTextBox),
-          ("Address", (Control)addressTextBox),
-          ("Default hourly rate", (Control)defaultHourlyRateTextBox),
-          ("Default currency", (Control)defaultCurrencyComboBox),
-          ("Invoice number prefix", (Control)invoiceNumberPrefixTextBox),
-          ("Current invoice number", (Control)currentInvoiceNumberTextBox),
-          ("Billing rounding", (Control)roundingModeComboBox),
-          ("Rounding minutes (blank for the default)", (Control)roundingMinutesTextBox)
-        });
+          new[] { ("Name", (Control)nameTextBox) },
+          new[] { ("Company name", (Control)companyNameTextBox) },
+          new[] { ("Email", (Control)emailTextBox), ("Phone", (Control)phoneTextBox) },
+          new[] { ("Address", (Control)addressTextBox) },
+          new[] { ("Default hourly rate", (Control)defaultHourlyRateTextBox), ("Default currency", (Control)defaultCurrencyComboBox) },
+          new[] { ("Invoice number prefix", (Control)invoiceNumberPrefixTextBox), ("Current invoice number", (Control)currentInvoiceNumberTextBox) },
+          new[] { ("Billing rounding", (Control)roundingModeComboBox), ("Rounding minutes", (Control)roundingMinutesTextBox) }
+        },
+        ClientDialogWidth);
 
       name = nameTextBox.Text.Trim();
       companyName = companyNameTextBox.Text.Trim();
@@ -5517,7 +5872,31 @@ namespace TimeTracker
       return true;
     }
 
+    /// <summary>One field per row, which is what most dialogs want.</summary>
     private bool ShowSimpleForm(string title, IEnumerable<(string Label, Control Input)> fields)
+    {
+      return ShowSimpleForm(
+        title,
+        fields.Select(field => (IReadOnlyList<(string Label, Control Input)>)new[] { field }),
+        DefaultDialogWidth);
+    }
+
+    private const double DefaultDialogWidth = 520;
+
+    /// <summary>
+    /// Wider than the default so a paired row still gives each field room for its label: "Current
+    /// invoice number" over a half-width column is the tightest fit in the client dialog.
+    /// </summary>
+    private const double ClientDialogWidth = 620;
+
+    /// <summary>The gap between two fields sharing a row.</summary>
+    private const double PairedFieldGap = 14;
+
+    /// <summary>
+    /// The same form, but each row may carry more than one field so short inputs can sit side by
+    /// side instead of each taking a full row of a very tall dialog.
+    /// </summary>
+    private bool ShowSimpleForm(string title, IEnumerable<IReadOnlyList<(string Label, Control Input)>> rows, double dialogWidth)
     {
       Window dialog = new()
       {
@@ -5525,7 +5904,7 @@ namespace TimeTracker
         Owner = this,
         WindowStartupLocation = WindowStartupLocation.CenterOwner,
         ResizeMode = ResizeMode.NoResize,
-        Width = 520,
+        Width = dialogWidth,
         SizeToContent = SizeToContent.Height
       };
 
@@ -5555,19 +5934,22 @@ namespace TimeTracker
         Margin = new Thickness(24, 22, 24, 14)
       };
 
-      foreach ((string label, Control input) in fields)
+      foreach (IReadOnlyList<(string Label, Control Input)> row in rows)
       {
-        form.Children.Add(new TextBlock
+        if (row.Count == 0)
         {
-          Text = label,
-          Foreground = PrimaryTextBrush,
-          FontSize = 14,
-          FontWeight = FontWeights.SemiBold,
-          Margin = new Thickness(0, 0, 0, 4)
-        });
+          continue;
+        }
 
-        PrepareDialogInput(input);
-        form.Children.Add(input);
+        if (row.Count == 1)
+        {
+          form.Children.Add(CreateDialogFieldLabel(row[0].Label, 0));
+          PrepareDialogInput(row[0].Input);
+          form.Children.Add(row[0].Input);
+          continue;
+        }
+
+        form.Children.Add(CreateDialogFieldRow(row));
       }
       Grid.SetRow(form, 1);
       shell.Children.Add(form);
@@ -5597,6 +5979,55 @@ namespace TimeTracker
       dialog.Content = shell;
 
       return dialog.ShowDialog() == true;
+    }
+
+    /// <summary>
+    /// Fields sharing a row, in equal columns with their labels above them. The label and the input
+    /// are added column by column, so tabbing runs left to right and then on to the next row.
+    /// </summary>
+    private static Grid CreateDialogFieldRow(IReadOnlyList<(string Label, Control Input)> row)
+    {
+      Grid grid = new();
+      grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+      grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+      for (int index = 0; index < row.Count; index++)
+      {
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+      }
+
+      for (int index = 0; index < row.Count; index++)
+      {
+        double leftGap = index == 0 ? 0 : PairedFieldGap;
+
+        TextBlock label = CreateDialogFieldLabel(row[index].Label, leftGap);
+        Grid.SetColumn(label, index);
+        Grid.SetRow(label, 0);
+        grid.Children.Add(label);
+
+        Control input = row[index].Input;
+        PrepareDialogInput(input);
+        // PrepareDialogInput has just written the margin, so the gap goes on afterwards.
+        input.Margin = new Thickness(leftGap, input.Margin.Top, 0, input.Margin.Bottom);
+        Grid.SetColumn(input, index);
+        Grid.SetRow(input, 1);
+        grid.Children.Add(input);
+      }
+
+      return grid;
+    }
+
+    private static TextBlock CreateDialogFieldLabel(string text, double leftGap)
+    {
+      return new TextBlock
+      {
+        Text = text,
+        Foreground = PrimaryTextBrush,
+        FontSize = 14,
+        FontWeight = FontWeights.SemiBold,
+        Margin = new Thickness(leftGap, 0, 0, 4),
+        TextTrimming = TextTrimming.CharacterEllipsis
+      };
     }
 
     private static void PrepareDialogInput(Control input)
@@ -5980,6 +6411,24 @@ namespace TimeTracker
       };
     }
 
+    private sealed class CloseButtonActionOption
+    {
+      public CloseButtonActionOption(CloseButtonAction value, string displayName)
+      {
+        Value = value;
+        DisplayName = displayName;
+      }
+
+      public CloseButtonAction Value { get; }
+      public string DisplayName { get; }
+
+      public static IReadOnlyList<CloseButtonActionOption> All { get; } = new[]
+      {
+        new CloseButtonActionOption(CloseButtonAction.MinimiseToTray, "Minimise to the tray"),
+        new CloseButtonActionOption(CloseButtonAction.ExitApplication, "Exit Time Tracker")
+      };
+    }
+
     private sealed class LocaleDateConverter : IValueConverter
     {
       private readonly bool _includeTime;
@@ -6040,33 +6489,53 @@ namespace TimeTracker
       if (isRestoringBackup)
       {
         SaveWindowState();
+        ShutdownApplication();
         return;
       }
 
-      if (!timeTracker.HasRunningWork)
-      {
-        SaveWindowState();
-        timeTracker.SaveChanges();
-        return;
-      }
-
-      MessageBoxResult result = MessageBox.Show(
-        this,
-        "A job is currently running. Are you sure you want to close Time Tracker?",
-        "Running job",
-        MessageBoxButton.YesNo,
-        MessageBoxImage.Warning);
-
-      if (result != MessageBoxResult.Yes)
+      // Closing to the tray is not an exit at all: the window hides, the timer carries on, and
+      // nothing is written that a real exit would not have written anyway.
+      if (!isExitingApplication && ShouldMinimiseToTrayOnClose())
       {
         e.Cancel = true;
+        MinimiseToTray();
         return;
+      }
+
+      if (timeTracker.HasRunningWork)
+      {
+        MessageBoxResult result = MessageBox.Show(
+          this,
+          "A job is currently running. Are you sure you want to close Time Tracker?",
+          "Running job",
+          MessageBoxButton.YesNo,
+          MessageBoxImage.Warning);
+
+        if (result != MessageBoxResult.Yes)
+        {
+          e.Cancel = true;
+
+          // A tray exit that was turned down must not leave the window primed to close next time.
+          isExitingApplication = false;
+          return;
+        }
       }
 
       SaveWindowState();
 
       // The running job is only written to disk periodically now, so flush it on the way out.
       timeTracker.SaveChanges();
+      ShutdownApplication();
+    }
+
+    /// <summary>
+    /// Ends the process. The application shuts down on an explicit request rather than when the
+    /// last window closes, because hiding the window to the tray would otherwise exit the app.
+    /// </summary>
+    private void ShutdownApplication()
+    {
+      DisposeTrayIcon();
+      System.Windows.Application.Current?.Shutdown();
     }
   }
 

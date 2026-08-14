@@ -20,17 +20,28 @@ namespace TimeTracker.Services
     private readonly WinForms.NotifyIcon notifyIcon;
     private readonly WinForms.ContextMenuStrip contextMenu;
     private readonly WinForms.ToolStripMenuItem stopTimerItem;
+    private readonly WinForms.ToolStripMenuItem pauseResumeItem;
 
     private bool disposed;
 
     public event EventHandler? OpenRequested;
     public event EventHandler? StopTimerRequested;
+
+    /// <summary>
+    /// The pause menu item was clicked. The host does not know whether that means pause or resume;
+    /// the caller decides from the model and calls <see cref="SetPauseState" /> to relabel it.
+    /// </summary>
+    public event EventHandler? PauseResumeRequested;
+
     public event EventHandler? ExitRequested;
 
     public TrayIconHost(string tooltip)
     {
       WinForms.ToolStripMenuItem openItem = new("Open Time Tracker");
       openItem.Click += OnOpenClicked;
+
+      pauseResumeItem = new WinForms.ToolStripMenuItem("Pause timer");
+      pauseResumeItem.Click += OnPauseResumeClicked;
 
       stopTimerItem = new WinForms.ToolStripMenuItem("Stop timer");
       stopTimerItem.Click += OnStopTimerClicked;
@@ -40,6 +51,7 @@ namespace TimeTracker.Services
 
       contextMenu = new WinForms.ContextMenuStrip();
       contextMenu.Items.Add(openItem);
+      contextMenu.Items.Add(pauseResumeItem);
       contextMenu.Items.Add(stopTimerItem);
       contextMenu.Items.Add(new WinForms.ToolStripSeparator());
       contextMenu.Items.Add(exitItem);
@@ -87,6 +99,19 @@ namespace TimeTracker.Services
       }
     }
 
+    /// <summary>
+    /// Puts the pause menu item in step with the timer: it reads "Resume timer" while the job is
+    /// paused, and greys out when there is nothing to pause.
+    /// </summary>
+    public void SetPauseState(bool isPaused, bool enabled)
+    {
+      if (!disposed)
+      {
+        pauseResumeItem.Text = isPaused ? "Resume timer" : "Pause timer";
+        pauseResumeItem.Enabled = enabled;
+      }
+    }
+
     /// <summary>Shows a notification balloon. Does nothing while the icon is hidden.</summary>
     public void ShowBalloon(string title, string message)
     {
@@ -127,6 +152,11 @@ namespace TimeTracker.Services
     private void OnStopTimerClicked(object? sender, EventArgs e)
     {
       StopTimerRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void OnPauseResumeClicked(object? sender, EventArgs e)
+    {
+      PauseResumeRequested?.Invoke(this, EventArgs.Empty);
     }
 
     private void OnExitClicked(object? sender, EventArgs e)

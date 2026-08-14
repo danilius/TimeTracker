@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Threading.Tasks;
 using System.Windows;
+using TimeTracker.Services;
 using TimeTracker.Utils;
 
 namespace Time_Tracker
@@ -11,6 +12,10 @@ namespace Time_Tracker
   /// </summary>
   public partial class App : Application
   {
+    private const string SingleInstanceAppId = "TimeTracker";
+
+    private TimeTracker.MainWindow? mainWindow;
+
     public App()
     {
       DispatcherUnhandledException += App_DispatcherUnhandledException;
@@ -23,12 +28,49 @@ namespace Time_Tracker
       try
       {
         base.OnStartup(e);
+
+        // The guard is claimed before the window is built and before the model opens the database,
+        // so a second copy signals the first and dies without touching anything the owner holds.
+        // This is also why App.xaml no longer carries a StartupUri: the window has to be created
+        // here, after the check, rather than by the framework before OnStartup returns.
+        if (!SingleInstanceGuard.TryAcquire(SingleInstanceAppId))
+        {
+          Shutdown();
+          return;
+        }
+
+        SingleInstanceGuard.ActivationRequested += SingleInstanceGuard_ActivationRequested;
+
+        mainWindow = new TimeTracker.MainWindow();
+        MainWindow = mainWindow;
+        mainWindow.Show();
       }
       catch (Exception ex)
       {
         ReportFatalException("Startup exception", ex);
         throw;
       }
+    }
+
+    /// <summary>
+    /// Another copy of the application was started. The guard raises this on its own wait thread,
+    /// so the work of showing a window has to be handed to the dispatcher.
+    /// </summary>
+    private void SingleInstanceGuard_ActivationRequested(object? sender, EventArgs e)
+    {
+      Dispatcher.BeginInvoke(new Action(() => mainWindow?.RestoreFromTray()));
+    }
+
+    protected override void OnExit(ExitEventArgs e)
+    {
+      SingleInstanceGuard.ActivationRequested -= SingleInstanceGuard_ActivationRequested;
+      SingleInstanceGuard.Release();
+
+      // Belt and braces: a normal exit disposes the icon on the way through Window_Closing, but an
+      // exit that never reaches it would otherwise leave a ghost icon in the notification area.
+      mainWindow?.DisposeTrayIcon();
+
+      base.OnExit(e);
     }
 
     private void App_DispatcherUnhandledException(object sender, System.Windows.Threading.DispatcherUnhandledExceptionEventArgs e)

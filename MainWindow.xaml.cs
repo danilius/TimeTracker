@@ -1172,9 +1172,11 @@ namespace TimeTracker
       StackPanel content = new();
       content.Children.Add(CreateSectionTitle("Ready to invoice", "Estimated unbilled value"));
 
+      // Unlike the rest of the dashboard this panel is answering "what would I invoice?", so it
+      // shows billed time with the client's rounding applied rather than raw tracked time.
       List<IGrouping<string, WorkEntry>> groups = entries
         .GroupBy(entry => $"{(string.IsNullOrWhiteSpace(entry.ClientName) ? "No client" : entry.ClientName)}|{(string.IsNullOrWhiteSpace(entry.ProjectName) ? "No project" : entry.ProjectName)}")
-        .OrderByDescending(group => TimeTrackerModel.CalculateTotal(group))
+        .OrderByDescending(group => TimeTrackerModel.CalculateBilledTotal(group))
         .Take(6)
         .ToList();
 
@@ -1193,8 +1195,8 @@ namespace TimeTracker
           content.Children.Add(CreateInvoiceCandidateRow(
             clientName,
             projectName,
-            $"{group.Sum(entry => entry.Duration.TotalHours):0.#}h",
-            FormatTotalsByCurrency(group),
+            $"{TimeTrackerModel.CalculateBilledHoursTotal(group):0.#}h",
+            FormatBilledTotalsByCurrency(group),
             GetClientBrush(clientName)));
         }
       }
@@ -5121,6 +5123,31 @@ namespace TimeTracker
       panel.Children.Add(timeFormatComboBox);
 
       panel.Children.Add(CreateSettingsHeading("Backups"));
+      panel.Children.Add(CreateSettingsHelpText(
+        "Time Tracker keeps a copy of your data from each day you use it, and takes another copy "
+        + "just before you restore one. When there are more copies than this, the oldest are "
+        + "removed. Each copy is about the size of your data file, so keeping plenty costs very "
+        + "little space."));
+      panel.Children.Add(CreateSettingsLabel("Copies to keep"));
+
+      TextBox backupsToKeepTextBox = CreateSettingsTextBox(settings.BackupsToKeep.ToString(CultureInfo.CurrentCulture));
+      backupsToKeepTextBox.LostFocus += (_, _) =>
+      {
+        if (int.TryParse(backupsToKeepTextBox.Text, NumberStyles.Integer, CultureInfo.CurrentCulture, out int copiesToKeep)
+          && copiesToKeep >= 1
+          && copiesToKeep <= 999)
+        {
+          settings.BackupsToKeep = copiesToKeep;
+          settings.Save();
+        }
+        else
+        {
+          // Put the stored value back rather than silently keeping a number that was never saved.
+          backupsToKeepTextBox.Text = settings.BackupsToKeep.ToString(CultureInfo.CurrentCulture);
+        }
+      };
+      panel.Children.Add(backupsToKeepTextBox);
+
       panel.Children.Add(CreateBackupsList());
       timeFormatComboBox.SelectionChanged += (_, _) =>
       {
@@ -6089,6 +6116,23 @@ namespace TimeTracker
         Text = text,
         FontWeight = FontWeights.SemiBold,
         Margin = new Thickness(0, 0, 0, 4)
+      };
+    }
+
+    /// <summary>
+    /// Explanatory text under a settings heading, for choices whose consequences are not obvious
+    /// from the label alone.
+    /// </summary>
+    private static TextBlock CreateSettingsHelpText(string text)
+    {
+      return new TextBlock
+      {
+        Text = text,
+        Foreground = SecondaryTextBrush,
+        TextWrapping = TextWrapping.Wrap,
+        MaxWidth = 520,
+        HorizontalAlignment = HorizontalAlignment.Left,
+        Margin = new Thickness(0, 0, 0, 12)
       };
     }
 

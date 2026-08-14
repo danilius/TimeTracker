@@ -14,7 +14,6 @@ namespace TimeTracker.Services
   {
     private const string DataCollectionName = "app_data";
     private const string DataRecordID = "main";
-    private const int BackupsToKeep = 10;
     private const string DailyBackupPrefix = "tt_data-";
     private const string BeforeRestoreBackupPrefix = "tt_data-before-restore-";
 
@@ -51,9 +50,9 @@ namespace TimeTracker.Services
     }
 
     /// <summary>
-    /// Copies the data file into the backup folder once per day and keeps the most recent
-    /// <see cref="BackupsToKeep" /> copies. Everything lives in a single record that is rewritten
-    /// on every save, so one bad write would otherwise take the whole billing history with it.
+    /// Copies the data file into the backup folder once per day, keeping as many copies as the
+    /// user has asked for. Everything lives in a single record that is rewritten on every save, so
+    /// one bad write would otherwise take the whole billing history with it.
     /// </summary>
     /// <returns>The backup written, or null when nothing needed doing or the copy failed.</returns>
     public static string? CreateDailyBackup()
@@ -140,11 +139,12 @@ namespace TimeTracker.Services
 
       if (File.Exists(databaseFile))
       {
-        safetyCopyPath = Path.Combine(backupFolder, $"tt_data-before-restore-{DateTime.Now:yyyyMMdd-HHmmss}.db");
+        safetyCopyPath = Path.Combine(backupFolder, $"{BeforeRestoreBackupPrefix}{DateTime.Now:yyyyMMdd-HHmmss}.db");
         File.Copy(databaseFile, safetyCopyPath, true);
       }
 
       File.Copy(backupPath, databaseFile, true);
+      PruneBackups(backupFolder);
 
       return safetyCopyPath;
     }
@@ -173,18 +173,31 @@ namespace TimeTracker.Services
       return fileInfo.LastWriteTime;
     }
 
+    /// <summary>
+    /// Trims both kinds of copy to the configured limit, counted separately so a run of restores
+    /// cannot push the daily history out and vice versa.
+    /// </summary>
     private static void PruneBackups(string backupFolder)
     {
-      // Only the daily copies are on a rota. The copy taken before a restore is the undo for that
-      // restore, so it stays until the user clears it out themselves.
-      string[] backups = Directory.GetFiles(backupFolder, "tt_data-*.db")
-        .Where(IsDailyBackup)
-        .ToArray();
+      int keep = TTAppSettings.Instance.BackupsToKeep;
 
+      if (keep < 1)
+      {
+        keep = 1;
+      }
+
+      string[] allBackups = Directory.GetFiles(backupFolder, "tt_data-*.db");
+
+      PruneGroup(allBackups.Where(IsDailyBackup).ToArray(), keep);
+      PruneGroup(allBackups.Where(IsBeforeRestoreBackup).ToArray(), keep);
+    }
+
+    private static void PruneGroup(string[] backups, int keep)
+    {
       // Dated names sort chronologically, so the newest are simply the last by name.
       Array.Sort(backups, StringComparer.OrdinalIgnoreCase);
 
-      for (int index = 0; index < backups.Length - BackupsToKeep; index++)
+      for (int index = 0; index < backups.Length - keep; index++)
       {
         try
         {
@@ -197,6 +210,12 @@ namespace TimeTracker.Services
         {
         }
       }
+    }
+
+    private static bool IsBeforeRestoreBackup(string backupPath)
+    {
+      return Path.GetFileNameWithoutExtension(backupPath)
+        .StartsWith(BeforeRestoreBackupPrefix, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

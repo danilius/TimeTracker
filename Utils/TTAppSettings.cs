@@ -114,6 +114,18 @@ namespace TimeTracker.Utils
       set { _idleThresholdMinutes = value; }
     }
 
+    /// <summary>
+    /// How many daily backups to keep, and separately how many pre-restore safety copies. A copy
+    /// is roughly the size of the data file, so the default keeps about a month of history for a
+    /// few megabytes.
+    /// </summary>
+    private int _backupsToKeep = 30;
+    public int BackupsToKeep
+    {
+      get { return _backupsToKeep; }
+      set { _backupsToKeep = value; }
+    }
+
     private bool _showTrayIcon = true;
     public bool ShowTrayIcon
     {

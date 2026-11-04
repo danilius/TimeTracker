@@ -28,6 +28,13 @@ namespace TimeTracker.Dialogs
     private readonly DialogMode _mode;
     private bool _isSyncingDuration;
 
+    /// <summary>
+    /// Time the entry being edited has already had taken off it, through pausing or through
+    /// discarded idle time. The duration box is billable time, so this sits between it and the
+    /// start and end times, which stay a plain record of when the work happened.
+    /// </summary>
+    private TimeSpan _pausedDuration = TimeSpan.Zero;
+
     public NewWorkEntryDialog(DialogMode mode = DialogMode.ManualEntry)
     {
       _mode = mode;
@@ -53,14 +60,25 @@ namespace TimeTracker.Dialogs
       ClientComboBox.Text = workEntry.Project?.Client?.Name ?? string.Empty;
       ProjectComboBox.Text = workEntry.Project?.Name ?? string.Empty;
       DescriptionTextBox.Text = workEntry.Description ?? string.Empty;
+      // Whatever the model would subtract from this entry right now, including a pause that is
+      // still open. Captured once: an open pause grows while the dialog sits there, and the
+      // figure shown has to be the one that is saved.
+      _pausedDuration = workEntry.PausedDuration;
+
+      if (workEntry.PausedAt.HasValue)
+      {
+        _pausedDuration += DateTime.Now - workEntry.PausedAt.Value;
+      }
+
       StartTimePicker.SelectedDate = workEntry.StartTime;
       EndTimePicker.SelectedDate = workEntry.EndTime == default
-        ? workEntry.StartTime + workEntry.Duration
+        ? BillableSpan.EndTimeFor(workEntry.StartTime, workEntry.Duration, _pausedDuration)
         : workEntry.EndTime;
       HourlyRateTextBox.Text = workEntry.HourlyRate.ToString("0.##");
       CurrencyComboBox.Text = workEntry.Currency;
 
       UpdateDurationDisplay();
+      UpdatePausedHint();
     }
 
     public NewWorkEntryDialog(Project project, DialogMode mode = DialogMode.JobTimer) : this(mode)
@@ -76,6 +94,10 @@ namespace TimeTracker.Dialogs
     public decimal HourlyRate { get; private set; }
     public string Currency { get; private set; } = string.Empty;
     public DateTime StartTime { get; private set; }
+    /// <summary>
+    /// Billable time: what the job is worth, with any paused or idle time already taken off.
+    /// Null means the timer is to be started instead, so there is no duration to record yet.
+    /// </summary>
     public TimeSpan? Duration { get; private set; }
     public bool StartTimerNow { get; private set; }
 
@@ -144,8 +166,33 @@ namespace TimeTracker.Dialogs
         return;
       }
 
-      TimeSpan duration = EndTimePicker.SelectedDate - StartTimePicker.SelectedDate;
+      TimeSpan duration = BillableDurationOf(EndTimePicker.SelectedDate - StartTimePicker.SelectedDate);
       SetDurationText(duration <= TimeSpan.Zero ? "0m" : FormatDuration(duration));
+    }
+
+    /// <summary>
+    /// The billable part of an elapsed span: what the entry is worth once the time already
+    /// taken off it is gone. Never negative, matching the model.
+    /// </summary>
+    private TimeSpan BillableDurationOf(TimeSpan elapsed)
+    {
+      return BillableSpan.BillableOf(elapsed, _pausedDuration);
+    }
+
+    /// <summary>
+    /// Says so where the duration box is not simply the gap between the two times, so the
+    /// smaller figure does not look like a mistake.
+    /// </summary>
+    private void UpdatePausedHint()
+    {
+      if (_pausedDuration <= TimeSpan.Zero)
+      {
+        PausedHintTextBlock.Visibility = Visibility.Collapsed;
+        return;
+      }
+
+      PausedHintTextBlock.Text = $"Billable time, excluding {FormatDuration(_pausedDuration)} paused or idle.";
+      PausedHintTextBlock.Visibility = Visibility.Visible;
     }
 
     private void SetDurationText(string text)
@@ -173,7 +220,7 @@ namespace TimeTracker.Dialogs
       }
 
       _isSyncingDuration = true;
-      EndTimePicker.SelectedDate = StartTimePicker.SelectedDate + duration;
+      EndTimePicker.SelectedDate = BillableSpan.EndTimeFor(StartTimePicker.SelectedDate, duration, _pausedDuration);
       _isSyncingDuration = false;
     }
 
@@ -350,7 +397,7 @@ namespace TimeTracker.Dialogs
         }
 
         DurationTextBox.BorderBrush = Brushes.Gray;
-        EndTimePicker.SelectedDate = StartTimePicker.SelectedDate + duration;
+        EndTimePicker.SelectedDate = BillableSpan.EndTimeFor(StartTimePicker.SelectedDate, duration, _pausedDuration);
         Duration = duration;
       }
 

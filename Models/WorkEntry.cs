@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Text.Json.Serialization;
+using TimeTracker.Utils;
 
 namespace TimeTracker.Models
 {
@@ -203,9 +204,7 @@ namespace TimeTracker.Models
           paused += DateTime.Now - _pausedAt.Value;
         }
 
-        TimeSpan worked = elapsed - paused;
-
-        return worked < TimeSpan.Zero ? TimeSpan.Zero : worked;
+        return BillableSpan.BillableOf(elapsed, paused);
       }
     }
 

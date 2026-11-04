@@ -938,9 +938,19 @@ namespace TimeTracker.Models
         workEntry.Project = project;
       }
 
+      // An edited duration is billable time, while the start and end times are a record of when
+      // the work happened, so the span between them has to hold the duration *and* whatever was
+      // paused. Adding the paused total back here is what stops it being subtracted twice: that
+      // double subtraction is how a 34 minute job carrying an hour of discarded idle time ended
+      // up reading zero. An open pause is closed first so the figure is settled before use.
+      if (duration != null)
+      {
+        ClosePause(workEntry, DateTime.Now);
+      }
+
       if (duration != null && workEntry.IsRunning)
       {
-        workEntry.StartTime = DateTime.Now - duration.Value;
+        workEntry.StartTime = BillableSpan.StartTimeFor(DateTime.Now, duration.Value, workEntry.PausedDuration);
         workEntry.EndTime = DateTime.Now;
       }
       else
@@ -948,18 +958,8 @@ namespace TimeTracker.Models
         workEntry.StartTime = startTime;
         if (duration != null)
         {
-          workEntry.EndTime = startTime + duration.Value;
+          workEntry.EndTime = BillableSpan.EndTimeFor(startTime, duration.Value, workEntry.PausedDuration);
         }
-      }
-
-      if (duration != null)
-      {
-        // A typed duration is a statement about billable time, and it is stored as the span
-        // between the start and end times, so any pause already taken off this job is part of
-        // that figure. Leaving the old paused total in place would subtract it a second time,
-        // which is how an edited job carrying discarded idle time ended up reading zero.
-        workEntry.PausedAt = null;
-        workEntry.PausedDuration = TimeSpan.Zero;
       }
 
       workEntry.Description = description;

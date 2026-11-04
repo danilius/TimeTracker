@@ -257,7 +257,16 @@
               FontSize="16"
               Text="0m"
               TextChanged="DurationTextBox_TextChanged"
-              ToolTip="Enter a duration such as 1h 30m, 90m, or 1:30" />
+              ToolTip="Billable time. Enter a duration such as 1h 30m, 90m, or 1:30" />
+            <TextBlock
+              x:Name="PausedHintTextBlock"
+              MaxWidth="160"
+              Margin="0,6,0,0"
+              HorizontalAlignment="Left"
+              FontSize="11"
+              Foreground="#8A8F98"
+              TextWrapping="Wrap"
+              Visibility="Collapsed" />
           </StackPanel>
         </Grid>
 

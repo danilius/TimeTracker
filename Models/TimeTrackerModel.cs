@@ -216,6 +216,35 @@ namespace TimeTracker.Models
       SaveData();
     }
 
+    /// <summary>
+    /// Clears a paused total that is longer than the job itself. Nothing that happens while a
+    /// job runs can produce that -- the elapsed span grows alongside the pause -- but an older
+    /// build let a typed duration overwrite the end time while leaving the paused total behind,
+    /// and such an entry reads as zero billable time. Zero is the only safe value: the typed
+    /// duration is what the user said the job was worth.
+    /// </summary>
+    public static void RepairPausedTotal(WorkEntry workEntry)
+    {
+      // No loaded entry is running yet, so a pause left open belongs to a session that has
+      // already ended. Closing it at the end time stops it counting up against a job that
+      // stopped recording hours ago.
+      if (workEntry.EndTime != default)
+      {
+        ClosePause(workEntry, workEntry.EndTime);
+      }
+
+      if (workEntry.PausedDuration <= TimeSpan.Zero || workEntry.EndTime == default)
+      {
+        return;
+      }
+
+      if (workEntry.PausedDuration > workEntry.EndTime - workEntry.StartTime)
+      {
+        workEntry.PausedAt = null;
+        workEntry.PausedDuration = TimeSpan.Zero;
+      }
+    }
+
     private void LoadData()
     {
       _data = _store.LoadData();
@@ -257,6 +286,8 @@ namespace TimeTracker.Models
             {
               workEntry.ID = Guid.NewGuid();
             }
+
+            RepairPausedTotal(workEntry);
           }
         }
       }
@@ -907,9 +938,19 @@ namespace TimeTracker.Models
         workEntry.Project = project;
       }
 
+      // An edited duration is billable time, while the start and end times are a record of when
+      // the work happened, so the span between them has to hold the duration *and* whatever was
+      // paused. Adding the paused total back here is what stops it being subtracted twice: that
+      // double subtraction is how a 34 minute job carrying an hour of discarded idle time ended
+      // up reading zero. An open pause is closed first so the figure is settled before use.
+      if (duration != null)
+      {
+        ClosePause(workEntry, DateTime.Now);
+      }
+
       if (duration != null && workEntry.IsRunning)
       {
-        workEntry.StartTime = DateTime.Now - duration.Value;
+        workEntry.StartTime = BillableSpan.StartTimeFor(DateTime.Now, duration.Value, workEntry.PausedDuration);
         workEntry.EndTime = DateTime.Now;
       }
       else
@@ -917,7 +958,7 @@ namespace TimeTracker.Models
         workEntry.StartTime = startTime;
         if (duration != null)
         {
-          workEntry.EndTime = startTime + duration.Value;
+          workEntry.EndTime = BillableSpan.EndTimeFor(startTime, duration.Value, workEntry.PausedDuration);
         }
       }
 

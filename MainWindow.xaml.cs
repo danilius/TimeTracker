@@ -2209,7 +2209,7 @@ namespace TimeTracker
         new TableColumn<WorkEntry>("Project", 1.45, CreateProjectCell),
         new TableColumn<WorkEntry>("Last entry", 1.25, job => CreateJobsTextCell(FormatDateTime(job.StartTime), false)),
         new TableColumn<WorkEntry>("Duration", 0.85, job => CreateJobsTextCell(FormatDurationShort(job.Duration), true)),
-        new TableColumn<WorkEntry>("Rate", 0.8, job => CreateJobsTextCell(FormatRate(job), false)),
+        new TableColumn<WorkEntry>("Value", 0.8, job => CreateJobsTextCell(FormatJobValue(job), true)),
         new TableColumn<WorkEntry>("Status", 0.9, job => CreateStatusBadge(DescribeJobStatus(job), job.IsRunning)),
         new TableColumn<WorkEntry>("Actions", 1.05, CreateJobActionsCell)
       };
@@ -3329,6 +3329,18 @@ namespace TimeTracker
       cell.Click += (_, _) => SortTimesheetsBy(sortColumn);
       Grid.SetColumn(cell, column);
       return cell;
+    }
+
+    /// <summary>
+    /// What the job is worth: the time tracked against it at its own rate. Billing rounding is
+    /// an invoice decision, so this shows the untouched tracked figure, as the reports and the
+    /// dashboard do.
+    /// </summary>
+    private static string FormatJobValue(WorkEntry job)
+    {
+      decimal value = Convert.ToDecimal(job.Duration.TotalHours) * job.HourlyRate;
+
+      return FormatMoney(value, job.Currency);
     }
 
     private static string FormatRate(WorkEntry entry)

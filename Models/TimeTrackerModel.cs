@@ -216,6 +216,35 @@ namespace TimeTracker.Models
       SaveData();
     }
 
+    /// <summary>
+    /// Clears a paused total that is longer than the job itself. Nothing that happens while a
+    /// job runs can produce that -- the elapsed span grows alongside the pause -- but an older
+    /// build let a typed duration overwrite the end time while leaving the paused total behind,
+    /// and such an entry reads as zero billable time. Zero is the only safe value: the typed
+    /// duration is what the user said the job was worth.
+    /// </summary>
+    public static void RepairPausedTotal(WorkEntry workEntry)
+    {
+      // No loaded entry is running yet, so a pause left open belongs to a session that has
+      // already ended. Closing it at the end time stops it counting up against a job that
+      // stopped recording hours ago.
+      if (workEntry.EndTime != default)
+      {
+        ClosePause(workEntry, workEntry.EndTime);
+      }
+
+      if (workEntry.PausedDuration <= TimeSpan.Zero || workEntry.EndTime == default)
+      {
+        return;
+      }
+
+      if (workEntry.PausedDuration > workEntry.EndTime - workEntry.StartTime)
+      {
+        workEntry.PausedAt = null;
+        workEntry.PausedDuration = TimeSpan.Zero;
+      }
+    }
+
     private void LoadData()
     {
       _data = _store.LoadData();
@@ -257,6 +286,8 @@ namespace TimeTracker.Models
             {
               workEntry.ID = Guid.NewGuid();
             }
+
+            RepairPausedTotal(workEntry);
           }
         }
       }
@@ -919,6 +950,16 @@ namespace TimeTracker.Models
         {
           workEntry.EndTime = startTime + duration.Value;
         }
+      }
+
+      if (duration != null)
+      {
+        // A typed duration is a statement about billable time, and it is stored as the span
+        // between the start and end times, so any pause already taken off this job is part of
+        // that figure. Leaving the old paused total in place would subtract it a second time,
+        // which is how an edited job carrying discarded idle time ended up reading zero.
+        workEntry.PausedAt = null;
+        workEntry.PausedDuration = TimeSpan.Zero;
       }
 
       workEntry.Description = description;

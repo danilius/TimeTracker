@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Globalization;
@@ -3212,7 +3212,7 @@ namespace TimeTracker
       Project,
       Start,
       Duration,
-      Rate
+      Total
     }
 
     private List<WorkEntry> SortTimesheetEntries(IEnumerable<WorkEntry> entries)
@@ -3227,7 +3227,7 @@ namespace TimeTracker
         TimesheetSortColumn.Client => ThenBySortDirection(ordered, entry => entry.ClientName, StringComparer.CurrentCultureIgnoreCase, isAscending),
         TimesheetSortColumn.Project => ThenBySortDirection(ordered, entry => entry.ProjectName, StringComparer.CurrentCultureIgnoreCase, isAscending),
         TimesheetSortColumn.Duration => ThenBySortDirection(ordered, entry => entry.Duration, null, isAscending),
-        TimesheetSortColumn.Rate => ThenBySortDirection(ordered, entry => entry.HourlyRate, null, isAscending),
+        TimesheetSortColumn.Total => ThenBySortDirection(ordered, entry => JobValue(entry), null, isAscending),
         _ => ThenBySortDirection(ordered, entry => entry.StartTime, null, isAscending)
       };
 
@@ -3304,7 +3304,7 @@ namespace TimeTracker
         new TableColumn<WorkEntry>("Project", 1.55, entry => CreateProjectCell(entry)) { SortColumn = TimesheetSortColumn.Project },
         new TableColumn<WorkEntry>("Start", 1.2, entry => CreateJobsTextCell(FormatDateTime(entry.StartTime), false)) { SortColumn = TimesheetSortColumn.Start },
         new TableColumn<WorkEntry>("Duration", 0.8, entry => CreateJobsTextCell(FormatDurationShort(entry.Duration), true)) { SortColumn = TimesheetSortColumn.Duration },
-        new TableColumn<WorkEntry>("Rate", 0.8, entry => CreateJobsTextCell(FormatRate(entry), false)) { SortColumn = TimesheetSortColumn.Rate },
+        new TableColumn<WorkEntry>("Total", 0.8, entry => CreateJobsTextCell(FormatJobValue(entry), true)) { SortColumn = TimesheetSortColumn.Total },
         new TableColumn<WorkEntry>("Actions", 0.85, CreateTimesheetActionsCell)
       };
     }
@@ -3338,14 +3338,16 @@ namespace TimeTracker
     /// </summary>
     private static string FormatJobValue(WorkEntry job)
     {
-      decimal value = Convert.ToDecimal(job.Duration.TotalHours) * job.HourlyRate;
-
-      return FormatMoney(value, job.Currency);
+      return FormatMoney(JobValue(job), job.Currency);
     }
 
-    private static string FormatRate(WorkEntry entry)
+    /// <summary>
+    /// The job's billable time at its own rate. Shared by the Jobs and Time sheets tables so the
+    /// figure they show and the figure they sort by cannot drift apart.
+    /// </summary>
+    private static decimal JobValue(WorkEntry job)
     {
-      return $"{entry.Currency}{entry.HourlyRate:0.##}/hr";
+      return Convert.ToDecimal(job.Duration.TotalHours) * job.HourlyRate;
     }
 
     /// <summary>
@@ -3501,7 +3503,7 @@ namespace TimeTracker
       {
         if (e.ClickCount == 2)
         {
-          EditReport(reportRow.Report);
+          OpenReportWindow(reportRow.Report);
         }
       };
 
@@ -4571,11 +4573,39 @@ namespace TimeTracker
       totalTextBlock.Text = $"Total: {FormatBilledTotalsByCurrency(selectedJobs)}";
     }
 
+    /// <summary>
+    /// Opens a report in its own window, which is what double clicking its row does. The window is
+    /// not modal, so several reports can be read side by side while the main window stays usable.
+    /// </summary>
+    private void OpenReportWindow(Report report)
+    {
+      ReportPreviewWindow window = new(
+        report.Name,
+        $"{FormatDate(report.StartDate)} to {FormatDate(report.EndDate)}",
+        CreateReportDocument(report),
+        () => PrintReport(report),
+        () => SaveReportFile(report))
+      {
+        Owner = this
+      };
+
+      window.Show();
+    }
+
+    /// <summary>
+    /// A report is a record of what was tracked, so it never rounds: rounding is a billing
+    /// decision and belongs to invoices alone.
+    /// </summary>
+    private FlowDocument CreateReportDocument(Report report)
+    {
+      return CreateJobsDocument(report.Name, timeTracker.GetReportJobs(report), report.StartDate, report.EndDate, false);
+    }
+
     private void PrintReport(Report report)
     {
-      // A report is a record of what was tracked, so it never rounds: rounding is a billing
-      // decision and belongs to invoices alone.
-      PrintFlowDocument(CreateJobsDocument(report.Name, timeTracker.GetReportJobs(report), report.StartDate, report.EndDate, false));
+      // A fresh document each time: printing resizes a document to the printable area, so the one
+      // on show in a preview window must not be the one handed to the printer.
+      PrintFlowDocument(CreateReportDocument(report));
     }
 
     private void PrintInvoice(Invoice invoice)

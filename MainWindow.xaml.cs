@@ -2874,15 +2874,12 @@ namespace TimeTracker
 
     private static string FormatMoney(decimal total, string currency)
     {
-      return string.IsNullOrWhiteSpace(currency)
-        ? total.ToString("0.00", CultureInfo.CurrentCulture)
-        : $"{currency}{total:0.00}";
+      return MoneyText.Format(total, currency);
     }
 
     /// <summary>
     /// A set of entries as money: one figure per currency, joined. Pounds cannot be added to euros,
-    /// so a mixed period reads as "£ 900.00 + € 130.01" rather than a single misleading number.
-    /// A single currency renders exactly as it always has.
+    /// so a mixed period reads as "£900.00 + €130.01" rather than a single misleading number.
     /// </summary>
     private static string FormatTotalsByCurrency(IEnumerable<WorkEntry> workEntries)
     {
@@ -2902,7 +2899,7 @@ namespace TimeTracker
     {
       return totals.Count == 0
         ? "0.00"
-        : string.Join(" + ", totals.Select(currencyTotal => $"{currencyTotal.Currency} {currencyTotal.Total:0.00}".Trim()));
+        : string.Join(" + ", totals.Select(currencyTotal => MoneyText.Format(currencyTotal.Total, currencyTotal.Currency)));
     }
 
     private static StackPanel CreateIconTextContent(string icon, string text)
@@ -2965,7 +2962,7 @@ namespace TimeTracker
     {
       return new TextBlock
       {
-        Text = $"{workEntry.Currency}{workEntry.HourlyRate:0.##}/hr",
+        Text = MoneyText.FormatRatePerHour(workEntry.HourlyRate, workEntry.Currency),
         Foreground = PrimaryTextBrush,
         Margin = new Thickness(0, 2, 0, 0)
       };
@@ -3423,7 +3420,7 @@ namespace TimeTracker
           string.IsNullOrWhiteSpace(client.Email) ? client.Phone : client.Email,
           string.IsNullOrWhiteSpace(client.Phone) ? client.Address : client.Phone,
           0)),
-        new TableColumn<Client>("Rate", 0.95, client => CreateJobsTextCell($"{client.DefaultCurrency}{client.DefaultHourlyRate:0.##}/hr", true)),
+        new TableColumn<Client>("Rate", 0.95, client => CreateJobsTextCell(MoneyText.FormatRatePerHour(client.DefaultHourlyRate, client.DefaultCurrency), true)),
         new TableColumn<Client>("Invoice", 0.9, client => CreateModernStackCell(client.InvoiceNumberPrefix, client.CurrentInvoiceNumber.ToString(CultureInfo.CurrentCulture), 0)),
         new TableColumn<Client>("Projects", 0.75, client => CreateJobsTextCell(client.Projects.Count.ToString(CultureInfo.CurrentCulture), true)),
         new TableColumn<Client>("Actions", 0.8, client => CreateModernActionsCell(0,
@@ -4061,7 +4058,7 @@ namespace TimeTracker
         : TimeTrackerModel.CalculateTotal(jobList);
 
       body.Append(Paragraph($"Hours total: {bodyHoursTotal:0.##}", "Total"));
-      body.Append(Paragraph($"Total: {TimeTrackerModel.GetCurrencySummary(jobList)} {bodyTotal:0.00}", "Total"));
+      body.Append(Paragraph($"Total: {MoneyText.Format(bodyTotal, TimeTrackerModel.GetCurrencySummary(jobList))}", "Total"));
 
       return "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
         "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">" +
@@ -4148,8 +4145,8 @@ namespace TimeTracker
               ["ProjectName"] = job.ProjectName,
               ["Description"] = job.Description ?? string.Empty,
               ["Hours"] = duration.TotalHours.ToString("0.##"),
-              ["Rate"] = $"{job.Currency} {job.HourlyRate:0.##}",
-              ["LineTotal"] = $"{job.Currency} {lineTotal:0.00}"
+              ["Rate"] = MoneyText.FormatRate(job.HourlyRate, job.Currency),
+              ["LineTotal"] = MoneyText.Format(lineTotal, job.Currency)
             };
 
             rows.Append(ReplaceParagraphPlaceholders(rowXml, replacements));
@@ -4276,8 +4273,8 @@ namespace TimeTracker
           job.ProjectName,
           job.Description ?? string.Empty,
           duration.TotalHours.ToString("0.##"),
-          $"{job.Currency} {job.HourlyRate:0.##}",
-          $"{job.Currency} {lineTotal:0.00}"
+          MoneyText.FormatRate(job.HourlyRate, job.Currency),
+          MoneyText.Format(lineTotal, job.Currency)
         }, false));
       }
 
@@ -4660,7 +4657,7 @@ namespace TimeTracker
         AddCell(row, job.ProjectName, false);
         AddCell(row, job.Description ?? string.Empty, false);
         AddCell(row, duration.TotalHours.ToString("0.##"), false);
-        AddCell(row, $"{job.Currency} {(Convert.ToDecimal(duration.TotalHours) * job.HourlyRate):0.00}", false);
+        AddCell(row, MoneyText.Format(Convert.ToDecimal(duration.TotalHours) * job.HourlyRate, job.Currency), false);
       }
 
       decimal documentTotal = useBilledDuration
@@ -4670,7 +4667,7 @@ namespace TimeTracker
         ? TimeTrackerModel.CalculateBilledHoursTotal(jobList)
         : TimeTrackerModel.CalculateHoursTotal(jobList);
 
-      document.Blocks.Add(new Paragraph(new Run($"Total: {TimeTrackerModel.GetCurrencySummary(jobList)} {documentTotal:0.00}"))
+      document.Blocks.Add(new Paragraph(new Run($"Total: {MoneyText.Format(documentTotal, TimeTrackerModel.GetCurrencySummary(jobList))}"))
       {
         FontSize = 16,
         FontWeight = FontWeights.SemiBold,
